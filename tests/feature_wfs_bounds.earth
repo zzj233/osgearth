@@ -1,0 +1,34 @@
+<!--
+osgEarth Sample
+Demonstrates how to read feature data from a WFS server
+-->
+
+<map name="WFS Feature Demo" type="geocentric" version="2">
+
+    <image name="World image" driver="gdal">
+        <url>../data/world.tif</url>
+    </image>
+
+    <model name="cities" driver="feature_geom">
+        <features name="cities" driver="wfs">
+            <url>http://demo.mapserver.org/cgi-bin/wfs</url>
+
+            <xmin>-180.0</xmin>
+            <ymin>-90.0</ymin>
+            <xmax>0</xmax>
+            <ymax>90.0</ymax>
+
+            <typename>cities</typename>
+            <outputformat>gml2</outputformat>
+        </features>
+
+        <styles>
+            <style type="text/css">
+                cities {
+                text-content:   [NAME];
+                }
+            </style>
+        </styles>
+    </model>
+
+</map>

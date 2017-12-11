@@ -37,7 +37,7 @@ namespace osgEarth { namespace Drivers
         /** Base URL of the WFS service (not including any WFS parameters) */
         optional<URI>& url() { return _url; }
         const optional<URI>& url() const { return _url; }
-        
+
         /** deprecated */
         optional<Config>& geometryProfileOptions() { return _geometryProfileConf; }
         const optional<Config>& geometryProfileOptions() const { return _geometryProfileConf; }
@@ -58,13 +58,16 @@ namespace osgEarth { namespace Drivers
         optional<bool>& disableTiling() { return _disableTiling; }
         const optional<bool>& disableTiling() const { return _disableTiling;}
 
-        /** The number of map units to buffer bounding box requests with 
+        /** The number of map units to buffer bounding box requests with
          *  to ensure that enough data is returned.  This is useful when rendering buffered lines
-         *  using the AGGLite driver.         
+         *  using the AGGLite driver.
          */
         optional<double>& buffer() { return _buffer;}
         const optional<double>& buffer() const { return _buffer;}
 
+        /** The bounds to use in the query.  Overrides any automatic bounds created by osgEarth */
+        optional<Bounds>& bounds() { return _bounds; }
+        const optional<Bounds>& bounds() const { return _bounds; }
 
 
     public:
@@ -73,7 +76,7 @@ namespace osgEarth { namespace Drivers
           _buffer( 0 )
         {
             setDriver( "wfs" );
-            fromConfig( _conf );            
+            fromConfig( _conf );
         }
 
         virtual ~WFSFeatureOptions() { }
@@ -81,13 +84,21 @@ namespace osgEarth { namespace Drivers
     public:
         Config getConfig() const {
             Config conf = FeatureSourceOptions::getConfig();
-            conf.set( "url", _url ); 
+            conf.set( "url", _url );
             conf.set( "geometry_profile", _geometryProfileConf );
             conf.set( "typename", _typename );
             conf.set( "outputformat", _outputFormat);
             conf.set( "maxfeatures", _maxFeatures );
             conf.set( "disable_tiling", _disableTiling );
             conf.set( "request_buffer", _buffer);
+
+            if (_bounds.isSet())
+            {
+                conf.update("xmin", toString(_bounds->xMin()));
+                conf.update("ymin", toString(_bounds->yMin()));
+                conf.update("xmax", toString(_bounds->xMax()));
+                conf.update("ymax", toString(_bounds->yMax()));
+            }
 
             return conf;
         }
@@ -99,23 +110,33 @@ namespace osgEarth { namespace Drivers
         }
 
     private:
-        void fromConfig( const Config& conf ) {            
+        void fromConfig( const Config& conf ) {
             conf.getIfSet( "url", _url );
             conf.getIfSet( "geometry_profile", _geometryProfileConf );
             conf.getIfSet( "typename", _typename);
             conf.getIfSet( "outputformat", _outputFormat );
             conf.getIfSet( "maxfeatures", _maxFeatures );
             conf.getIfSet( "disable_tiling", _disableTiling);
-            conf.getIfSet( "request_buffer", _buffer);            
+            conf.getIfSet( "request_buffer", _buffer);
+
+            if (conf.hasValue("xmin") && conf.hasValue("ymin") && conf.hasValue("xmax") && conf.hasValue("ymax"))
+            {
+                _bounds = Bounds(
+                    conf.value<double>("xmin", 0),
+                    conf.value<double>("ymin", 0),
+                    conf.value<double>("xmax", 0),
+                    conf.value<double>("ymax", 0));
+            }
         }
 
-        optional<URI>         _url;        
+        optional<URI>         _url;
         optional<std::string> _typename;
         optional<Config>      _geometryProfileConf;
         optional<std::string> _outputFormat;
-        optional<unsigned>    _maxFeatures;            
-        optional<bool>    _disableTiling;            
-        optional<double>  _buffer;            
+        optional<unsigned>    _maxFeatures;
+        optional<bool>    _disableTiling;
+        optional<double>  _buffer;
+        optional<Bounds>      _bounds;
     };
 
 } } // namespace osgEarth::Drivers
