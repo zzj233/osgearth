@@ -16,6 +16,11 @@ http://wiki.openstreetmap.org/wiki/Slippy_map_tilenames
         <profile>spherical-mercator</profile>
         <cache_policy usage="none"/>
     </image>
+
+    <image name="campus" driver="tilepackage">
+        <url>D:/geodata/simdis/arcgis_tile_package/campus/v101/Layers</url>
+        <profile>spherical-mercator</profile>
+    </image>
     
-    <xi:include href="viewpoints_flat.xml"/>
+    <xi:include href="viewpoints.xml"/>
 </map>

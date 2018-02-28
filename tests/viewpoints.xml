@@ -71,4 +71,13 @@
         <height>186.9731654571369</height>
         <srs>+proj=longlat +ellps=WGS84 +towgs84=0,0,0,0,0,0,0 +no_defs </srs>
     </viewpoint>
+    <viewpoint name="Campus">
+        <heading>0</heading>
+        <pitch>-89</pitch>
+        <range>2290.68m</range>
+        <x>-13046642.342470009</x>
+        <y>4036266.1056654109</y>
+        <height>186.9731654571369</height>
+        <srs>epsg:3857</srs>
+    </viewpoint>
 </viewpoints>
