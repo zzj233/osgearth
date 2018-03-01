@@ -68,7 +68,7 @@ namespace
 class BundleReader
 {
 public:
-    BundleReader(const std::string& bundleFile);
+    BundleReader(const std::string& bundleFile, unsigned int bundleSize);
 
     void init();
 
@@ -84,6 +84,7 @@ public:
 protected:
     std::string _bundleFile;
     std::string _indexFile;
+    unsigned int _bundleSize;
 
     std::ifstream _in;
 

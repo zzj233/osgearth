@@ -25,6 +25,7 @@
 #include <osgEarth/TileSource>
 #include <osgEarth/Registry>
 #include <osgEarth/URI>
+#include <osgEarth/XmlUtils>
 
 #include <osg/Notify>
 #include <osgDB/FileNameUtils>
@@ -41,10 +42,10 @@ using namespace osgEarth::Drivers;
 #define LC "[ReaderWriterTilePackage] "
 
 std::string padLeft(std::string value, unsigned int length)
-{    
+{
     std::stringstream ss;
     if (value.size() < length)
-    {        
+    {
         for (unsigned int i = 0; i < (length - value.size()); i++)
         {
             ss << "0";
@@ -55,51 +56,100 @@ std::string padLeft(std::string value, unsigned int length)
     else
     {
         return value;
-    }        
+    }
 }
 
 class TilePackageSource : public TileSource
 {
 public:
-    TilePackageSource( const TileSourceOptions& options ) :
-      TileSource( options ),
-      _options( options ),
-      _profileConf( ProfileOptions() )
-    {        
+    TilePackageSource(const TileSourceOptions& options) :
+        TileSource(options),
+        _options(options),
+        _profileConf(ProfileOptions()),
+        _tileSize(256),
+        _bundleSize(128),
+        _extension("png")
+    {
     }
 
     // override
-    Status initialize( const osgDB::Options* dbOptions )
+    Status initialize(const osgDB::Options* dbOptions)
     {
-        URI url = _options.url().value();		
 
-        _dbOptions = Registry::instance()->cloneOrCreateOptions( dbOptions );        
+        _dbOptions = Registry::instance()->cloneOrCreateOptions(dbOptions);
+
+        readConf();
 
         // establish a profile if we don't already have one:
-        if ( !getProfile() )
+        if (!getProfile())
         {
             const Profile* profile = NULL;
 
-            if ( _profileConf.isSet() )
+            if (_profileConf.isSet())
             {
-                profile = Profile::create( _profileConf.get() );
-            }            
+                profile = Profile::create(_profileConf.get());
+            }
             else
             {
                 // finally, fall back on mercator
                 profile = osgEarth::Registry::instance()->getSphericalMercatorProfile();
             }
-            setProfile( profile );
+            setProfile(profile);
         }
 
         return STATUS_OK;
     }
 
+    /**
+     * Reads layer info from the the conf file if it exists.
+     */
+    void readConf()
+    {    
+        std::string confPath = _options.url()->full() + "/conf.xml";
+
+        osg::ref_ptr<XmlDocument> doc = XmlDocument::load(confPath);
+        if (doc.valid())
+        {
+            Config conf = doc->getConfig();
+            Config tileCacheInfo = conf.child("cacheinfo").child("tilecacheinfo");
+            std::string wkt = tileCacheInfo.child("spatialreference").value("wkt");
+            if (!wkt.empty())
+            {
+                SpatialReference* srs = SpatialReference::create(wkt);
+                if (srs)
+                {
+                    if (srs->isMercator())
+                    {                 
+                        setProfile(osgEarth::Registry::instance()->getSphericalMercatorProfile());
+                    }
+                    else
+                    {
+                        setProfile(osgEarth::Registry::instance()->getGlobalGeodeticProfile());
+                    }
+                }
+            }
+
+            _tileSize = as<unsigned int>(tileCacheInfo.value("tilecols"), 256);
+
+            std::string format = conf.child("cacheinfo").child("tileimageinfo").value("cachetileformat");
+            if (format == "JPEG")
+            {
+                _extension = "jpg";
+            }
+            // All other cases will use png, this includes mixed mode.
+            else
+            {
+                _extension = "png";
+            }
+
+            _bundleSize = as<unsigned int>(conf.child("cacheinfo").child("cachestorageinfo").value("packetsize"), 128);
+        }
+    }
+
     // override
     int getPixelsPerTile() const
     {
-        // TODO:  Get size from conf
-        return 256;
+        return _tileSize;
     }
 
     // override
@@ -112,9 +162,9 @@ public:
         std::stringstream buf;
         buf << _options.url()->full() << "/_alllayers/";
         buf << "L" << padLeft(toString<unsigned int>(key.getLevelOfDetail()), 2) << "/";
-        
-        unsigned int colOffset = floor(numWide / BUNDLE_PACKET_SIZE);
-        unsigned int rowOffset = floor(numHigh / BUNDLE_PACKET_SIZE);
+
+        unsigned int colOffset = floor(numWide / _bundleSize);
+        unsigned int rowOffset = floor(numHigh / _bundleSize);
 
         buf << "R" << padLeft(toHex(rowOffset), 4) << "C" << padLeft(toHex(colOffset), 4);
         buf << ".bundle";
@@ -122,7 +172,7 @@ public:
         std::string bundleFile = buf.str();
         if (osgDB::fileExists(bundleFile))
         {
-            BundleReader reader(bundleFile);
+            BundleReader reader(bundleFile, _bundleSize);
             osg::Image* result = reader.readImage(key);
             return result;
         }
@@ -131,16 +181,18 @@ public:
     }
 
     // override
-    virtual std::string getExtension() const 
+    virtual std::string getExtension() const
     {
-        // TODO:  Get from config
-        return "png";
+        return _extension;
     }
 
 private:
     const TilePackageOptions _options;
-    optional<ProfileOptions> _profileConf;    
+    optional<ProfileOptions> _profileConf;
     osg::ref_ptr<osgDB::Options> _dbOptions;
+    unsigned int _tileSize;
+    std::string _extension;
+    unsigned int _bundleSize;
 };
 
 
@@ -149,7 +201,7 @@ class TilePackageTileSourceFactory : public TileSourceDriver
 public:
     TilePackageTileSourceFactory()
     {
-        supportsExtension( "osgearth_tilepackage", "TilePackage" );
+        supportsExtension("osgearth_tilepackage", "TilePackage");
     }
 
     virtual const char* className() const
@@ -159,10 +211,10 @@ public:
 
     virtual ReadResult readObject(const std::string& file_name, const Options* options) const
     {
-        if ( !acceptsExtension(osgDB::getLowerCaseFileExtension( file_name )))
+        if (!acceptsExtension(osgDB::getLowerCaseFileExtension(file_name)))
             return ReadResult::FILE_NOT_HANDLED;
 
-        return new TilePackageSource( getTileSourceOptions(options) );
+        return new TilePackageSource(getTileSourceOptions(options));
     }
 };
 

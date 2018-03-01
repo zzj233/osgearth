@@ -21,11 +21,12 @@
 */
 #include "BundleReader"
 
-BundleReader::BundleReader(const std::string& bundleFile) :
+BundleReader::BundleReader(const std::string& bundleFile, unsigned int bundleSize) :
     _bundleFile(bundleFile),
     _lod(0),
     _colOffset(0),
-    _rowOffset(0)
+    _rowOffset(0),
+    _bundleSize(bundleSize)
 {
     init();
 }
@@ -76,7 +77,7 @@ osg::Image* BundleReader::readImage(const TileKey& key)
 {
     // Figure out the index for the tilekey
     unsigned int row = key.getTileX() - _colOffset;
-    unsigned int i = key.getTileY() - _rowOffset + (row * 128);
+    unsigned int i = key.getTileY() - _rowOffset + (row * _bundleSize);
     return readImage(i);
 }
 
