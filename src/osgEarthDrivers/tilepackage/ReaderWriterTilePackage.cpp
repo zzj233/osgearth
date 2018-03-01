@@ -71,9 +71,7 @@ public:
     // override
     Status initialize( const osgDB::Options* dbOptions )
     {
-        URI url = _options.url().value();
-
-		OE_NOTICE << LC << "Initial URL: " << url.full() << std::endl;
+        URI url = _options.url().value();		
 
         _dbOptions = Registry::instance()->cloneOrCreateOptions( dbOptions );        
 
@@ -88,13 +86,11 @@ public:
             }            
             else
             {
-                // finally, fall back on lat/long
-                profile = osgEarth::Registry::instance()->getGlobalGeodeticProfile();
+                // finally, fall back on mercator
+                profile = osgEarth::Registry::instance()->getSphericalMercatorProfile();
             }
             setProfile( profile );
         }
-
-        BundleReader reader("D:/geodata/simdis/arcgis_tile_package/Midnight_Canvas_4326/CanvasMaps_Midnight/Layers/_alllayers/L08/R0080C0080.bundle");        
 
         return STATUS_OK;
     }
@@ -117,42 +113,21 @@ public:
         buf << _options.url()->full() << "/_alllayers/";
         buf << "L" << padLeft(toString<unsigned int>(key.getLevelOfDetail()), 2) << "/";
         
-        unsigned int colOffset = floor(numWide / 128);
-        unsigned int rowOffset = floor(numHigh / 128);
-
-        OE_NOTICE << "Offsets=" << colOffset << "x" << rowOffset << std::endl;        
+        unsigned int colOffset = floor(numWide / BUNDLE_PACKET_SIZE);
+        unsigned int rowOffset = floor(numHigh / BUNDLE_PACKET_SIZE);
 
         buf << "R" << padLeft(toHex(rowOffset), 4) << "C" << padLeft(toHex(colOffset), 4);
         buf << ".bundle";
 
-
         std::string bundleFile = buf.str();
-        OE_NOTICE << "Bundle file=" << bundleFile << std::endl;
-
         if (osgDB::fileExists(bundleFile))
         {
             BundleReader reader(bundleFile);
             osg::Image* result = reader.readImage(key);
-            /*
-            if (result)
-            {
-                std::stringstream outFile;
-                outFile << key.getLevelOfDetail() << "_" << key.getTileX() << "_" << key.getTileY() << ".png";
-                osgDB::writeImageFile(*result, outFile.str());
-            }
-            */
             return result;
         }
-        else
-        {
-            OE_NOTICE << bundleFile << " doesn't exist" << std::endl;
-        }
-        
+
         return 0;
-
-
-        //BundleReader reader("D:/geodata/simdis/arcgis_tile_package/Midnight_Canvas_4326/CanvasMaps_Midnight/Layers/_alllayers/L00/R0000C0000.bundle");
-        //return reader.readImage(0);
     }
 
     // override

@@ -81,9 +81,7 @@ public:
     {
 
         std::string base = osgDB::getNameLessExtension(_bundleFile);
-        OSG_NOTICE << "No extension" << base << std::endl;
         _indexFile = base + ".bundlx";
-        OSG_NOTICE << "indexFile=" << _indexFile << std::endl;
 
         // Open the bundle
         _in.open(_bundleFile.c_str(), std::ofstream::binary);
@@ -92,18 +90,14 @@ public:
         readIndex(_indexFile, _index);
 
         std::string baseName = osgDB::getSimpleFileName(base);
-        OE_NOTICE << "Basename=" << baseName << std::endl;
 
         _rowOffset = hexFromString(baseName.substr(1, 4));
         _colOffset = hexFromString(baseName.substr(6, 4));
-
-        std::cout << "row=" << _rowOffset << ", col=" << _colOffset << std::endl;
 
         std::string path = osgDB::getFilePath(_bundleFile);
 
         std::string levelDir = osgDB::getSimpleFileName(path);
         _lod = as<unsigned int>(levelDir.substr(1,2), 0);
-        OSG_NOTICE << "Level=" << _lod << std::endl;
     }
 
     /**
@@ -127,14 +121,9 @@ public:
 
     osg::Image* readImage(const TileKey& key)
     {
-        //unsigned int row = floor(float(i) / _bundleDim);
-        //unsigned int x = colOffset + row;
-        //unsigned int y = rowOffset + i - (row * _bundleDim);
-
         // Figure out the index for the tilekey
         unsigned int row = key.getTileX() - _colOffset;
         unsigned int i = key.getTileY() - _rowOffset + (row * 128);
-        OE_NOTICE << "Index=" << i << std::endl;
         return readImage(i);
     }
 
@@ -149,24 +138,11 @@ public:
         int size = computeOffset(sizeBuffer);
         if (size > 0)
         {
-            OSG_NOTICE << "Size=" << size << std::endl;
-
             std::string image;
             image.resize(size);
             _in.read(&image[0], size);            
             std::stringstream ss(image);            
-            return ImageUtils::readStream(ss, 0);
-            
-
-            /*
-            char* image = new char[size];            
-            _in.read(image, size);
-            std::stringstream outName;
-            outName << index << ".png";
-            std::ofstream out(outName.str().c_str(), std::ofstream::binary);
-            out.write(image, size);
-            delete[] image;
-            */
+            return ImageUtils::readStream(ss, 0);           
         }
 
         return 0;
