@@ -34,6 +34,7 @@
 #include <osgEarth/TraversalData>
 #include <osgEarth/VirtualProgram>
 #include <osgEarth/OverlayDecorator>
+#include <osgEarth/DrapingDecorator>
 #include <osgEarth/TerrainEngineNode>
 #include <osgEarth/TerrainResources>
 #include <osgEarth/ShaderGenerator>
@@ -338,31 +339,9 @@ MapNode::init()
             terrainOptions.enableLighting().value() ? 1 : 0 );
     }
 
-    // a decorator for overlay models:
+    // Set up GPU Clamping:
     _overlayDecorator = new OverlayDecorator();
     _terrainEngineContainer->addChild(_overlayDecorator);
-
-    // install the Draping technique for overlays:
-    DrapingTechnique* draping = new DrapingTechnique();
-
-    const char* envOverlayTextureSize = ::getenv("OSGEARTH_OVERLAY_TEXTURE_SIZE");
-
-    if ( _mapNodeOptions.overlayBlending().isSet() )
-        draping->setOverlayBlending( *_mapNodeOptions.overlayBlending() );
-    if ( envOverlayTextureSize )
-        draping->setTextureSize( as<int>(envOverlayTextureSize, 1024) );
-    else if ( _mapNodeOptions.overlayTextureSize().isSet() )
-        draping->setTextureSize( *_mapNodeOptions.overlayTextureSize() );
-    if ( _mapNodeOptions.overlayMipMapping().isSet() )
-        draping->setMipMapping( *_mapNodeOptions.overlayMipMapping() );
-    if ( _mapNodeOptions.overlayAttachStencil().isSet() )
-        draping->setAttachStencil( *_mapNodeOptions.overlayAttachStencil() );
-    if ( _mapNodeOptions.overlayResolutionRatio().isSet() )
-        draping->setResolutionRatio( *_mapNodeOptions.overlayResolutionRatio() );
-
-    draping->reestablish( _terrainEngine );
-    _overlayDecorator->addTechnique( draping );
-    _drapingManager = &draping->getDrapingManager();
 
     // install the Clamping technique for overlays:
     ClampingTechnique* clamping = new ClampingTechnique();
@@ -370,7 +349,11 @@ MapNode::init()
     _clampingManager = &clamping->getClampingManager();
 
     _overlayDecorator->setTerrainEngine(_terrainEngine);
-    _overlayDecorator->addChild(_terrainEngine);
+
+    // Set up Draping:
+    _drapingDecorator = new DrapingDecorator(_terrainEngine->getResources());
+    _drapingDecorator->addChild(_terrainEngine);
+    _overlayDecorator->addChild(_drapingDecorator);
 
     // make a group for the model layers. (Sticky otherwise the osg optimizer will remove it)
     _layerNodes = new StickyGroup();
@@ -816,7 +799,7 @@ MapNode::releaseGLObjects(osg::State* state) const
 DrapingManager*
 MapNode::getDrapingManager()
 {
-    return _drapingManager;
+    return &_drapingDecorator->getDrapingManager();
 }
 
 ClampingManager*

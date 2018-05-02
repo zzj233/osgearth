@@ -15,6 +15,10 @@ namespace osgEarth
        _sources[DepthOffsetVertex] = "@DepthOffset.vert.glsl@";
 
 
+       // Draping (new)
+       Draping = "Draping.glsl";
+       _sources[Draping] = "@Draping.glsl@";
+
        // Draping
        DrapingVertex = "Draping.vert.glsl";
        _sources[DrapingVertex] = "@Draping.vert.glsl@";

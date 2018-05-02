@@ -29,6 +29,7 @@
 #include <osgViewer/CompositeViewer>
 #include <osgViewer/ViewerEventHandlers>
 #include <osgEarth/OverlayDecorator>
+#include <osgEarth/DrapingDecorator>
 #include <osgEarth/MapNode>
 #include <osgEarthUtil/EarthManipulator>
 #include <osgEarthUtil/ExampleResources>
@@ -98,10 +99,11 @@ namespace
         {
             if ( ea.getEventType() == ea.FRAME )
             {
-                osg::Node* dump = _mapNode->getOverlayDecorator()->getDump();
+                //osg::Node* dump = _mapNode->getOverlayDecorator()->getDump();
+                osg::Node* dump = _mapNode->getDrapingDecorator()->getDump();
                 if ( !dump )
                 {
-                    _mapNode->getOverlayDecorator()->requestDump();
+                    //_mapNode->getOverlayDecorator()->requestDump();
                     aa.requestRedraw();
                 }
                 else
@@ -130,7 +132,7 @@ namespace
 
                     toggle(_parent, "camera", s_cameraCheck->getValue());
                     //toggle(_parent, "overlay", s_overlayCheck->getValue());
-                    toggle(_parent, "intersection", s_intersectionCheck->getValue());
+                    //toggle(_parent, "intersection", s_intersectionCheck->getValue());
                     toggle(_parent, "rtt", s_rttCheck->getValue());
 
                     aa.requestRedraw();
@@ -203,6 +205,7 @@ main(int argc, char** argv)
     mainView->setCameraManipulator( em );
     //mainView->setUpViewInWindow( 50, 50, 600, 600 );
     mainView->setUpViewInWindow( b, b, (width/2)-b*2, (height-b*4) );
+    mainView->getCamera()->setName("dump");
     viewer.addView( mainView );
 
     osgViewer::View* overlayView = new osgViewer::View();

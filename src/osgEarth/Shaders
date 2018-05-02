@@ -33,7 +33,8 @@ namespace osgEarth
 
         std::string ClipPlane;
         std::string DepthOffsetVertex;
-        std::string DrapingVertex, DrapingFragment;
+        std::string Draping; // new
+        std::string DrapingVertex, DrapingFragment; // old
         std::string GPUClampingVertex, GPUClampingFragment, GPUClampingVertexLib;
         std::string InstancingVertex;
         std::string LineDrawable;
