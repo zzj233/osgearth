@@ -40,8 +40,7 @@ SET(LIB_NAME osgEarth)
 set(TARGET_GLSL
     ClipPlane.glsl
     DepthOffset.vert.glsl
-    Draping.vert.glsl
-    Draping.frag.glsl
+    Draping.glsl
     GPUClamping.vert.glsl
     GPUClamping.vert.lib.glsl
     GPUClamping.frag.glsl
@@ -88,7 +87,7 @@ SET(LIB_PUBLIC_HEADERS
     DepthOffset
     DrapeableNode
     DrapingCullSet
-    DrapingTechnique
+    DrapingDecorator
     DrawInstanced
     ECEF
     ElevationLayer
@@ -267,7 +266,7 @@ set(TARGET_SRC
     DepthOffset.cpp
     DrapeableNode.cpp
     DrapingCullSet.cpp
-    DrapingTechnique.cpp
+    DrapingDecorator.cpp
     DrawInstanced.cpp
     ECEF.cpp
     ElevationLayer.cpp

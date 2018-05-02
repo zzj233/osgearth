@@ -31,6 +31,7 @@
 namespace osgEarth
 {
     class OverlayDecorator;
+    class DrapingDecorator;
     class Terrain;
     class TerrainEngineNode;
     class MapNodeCullData;
@@ -148,6 +149,7 @@ namespace osgEarth
          * access this directly. Instead install a DrapeableNode in the scene graph.
          */
         OverlayDecorator* getOverlayDecorator() { return _overlayDecorator; }
+        DrapingDecorator* getDrapingDecorator() { return _drapingDecorator; }
 
         /**
          * Gets the engine properties associated with this node. The engine
@@ -243,6 +245,7 @@ namespace osgEarth
         osg::ref_ptr<Map>  _map;
         osg::Group*        _layerNodes;
         OverlayDecorator*  _overlayDecorator;
+        DrapingDecorator*  _drapingDecorator;
         MapNodeOptions     _mapNodeOptions;
         Config             _externalConf;
         osg::Group*        _maskLayerNode;
