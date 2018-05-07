@@ -21,6 +21,7 @@ the feature data.
     </image>
     
     <feature_model name="Countries" feature_source="world-data">
+        <max_granularity>1.0</max_granularity>
         <styles>        
             <style type="text/css">
                 p1 {

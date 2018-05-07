@@ -53,6 +53,7 @@ _unit(-1),
 _multisamples(4u),
 _maxCascades(4u),
 _texSize(1024u),
+_mipmapping(false),
 _debug(false),
 _resources(resources)
 {
@@ -66,6 +67,10 @@ _resources(resources)
     c = ::getenv("OSGEARTH_DRAPING_MAX_CASCADES");
     if (c)
         setMaxNumCascades(osg::clampBetween((unsigned)atoi(c), 1u, 4u));
+
+    c = ::getenv("OSGEARTH_DRAPING_MIPMAPPING");
+    if (c)
+        setUseMipMaps(true);
 }
 
 void
@@ -84,6 +89,12 @@ void
 DrapingDecorator::setTextureSize(unsigned value)
 {
     _texSize = osg::clampBetween(value, 256u, 4096u);
+}
+
+void
+DrapingDecorator::setUseMipMaps(bool value)
+{
+    _mipmapping = value;
 }
 
 void
@@ -296,8 +307,9 @@ DrapingDecorator::CameraLocal::initialize(osg::Camera* camera, DrapingDecorator&
     unsigned textureHeight = decorator._texSize;
 
     unsigned multiSamples;
-    osg::Texture::FilterMode filterMode;
+    osg::Texture::FilterMode minifyFilter;
     osg::Vec4 clearColor;
+    bool mipmapping = decorator._mipmapping;
 
     // if the master cam is a picker, just limit to one cascade with no sampling.
     bool isPickCamera = camera->getName() == "osgEarth::RTTPicker";
@@ -305,14 +317,15 @@ DrapingDecorator::CameraLocal::initialize(osg::Camera* camera, DrapingDecorator&
     {
         _maxCascades = 1u; // limit to one cascade when picking
         multiSamples = 0u; // no antialiasing allowed
-        filterMode = osg::Texture::NEAREST; // no texture filtering allowed
+        minifyFilter = osg::Texture::NEAREST; // no texture filtering allowed
         clearColor.set(0,0,0,0);
+        mipmapping = false;
     }
     else
     {
         _maxCascades = decorator._maxCascades;
         multiSamples = decorator._multisamples;
-        filterMode = osg::Texture::LINEAR;
+        minifyFilter = mipmapping? osg::Texture::LINEAR_MIPMAP_LINEAR : osg::Texture::LINEAR;
         clearColor.set(1,1,1,0);
     }
 
@@ -322,8 +335,8 @@ DrapingDecorator::CameraLocal::initialize(osg::Camera* camera, DrapingDecorator&
     tex->setInternalFormat(GL_RGBA);
     tex->setSourceFormat(GL_RGBA);
     tex->setSourceType(GL_UNSIGNED_BYTE);
-    tex->setFilter(tex->MIN_FILTER, filterMode);
-    tex->setFilter(tex->MAG_FILTER, filterMode);
+    tex->setFilter(tex->MIN_FILTER, minifyFilter);
+    tex->setFilter(tex->MAG_FILTER, tex->LINEAR);
     tex->setWrap(tex->WRAP_S, tex->CLAMP_TO_EDGE);
     tex->setWrap(tex->WRAP_T, tex->CLAMP_TO_EDGE);
 
@@ -366,12 +379,13 @@ DrapingDecorator::CameraLocal::initialize(osg::Camera* camera, DrapingDecorator&
         rtt->setRenderTargetImplementation(rtt->FRAME_BUFFER_OBJECT);
         rtt->setComputeNearFarMode(rtt->DO_NOT_COMPUTE_NEAR_FAR);
         rtt->setImplicitBufferAttachmentMask(0, 0); // no depth buffer
+
         rtt->attach(
             rtt->COLOR_BUFFER,        // target
             tex,                      // texture to populate
             0u,                       // mipmap level
             i,                        // texture array index
-            false,                    // mipmapping = off
+            mipmapping,               // mipmapping
             multiSamples);            // antialiasing multi-samples
 
         // Set this so we can detect the RTT camera's parent for the DrapingCamera and
@@ -464,7 +478,7 @@ void DrapingDecorator::Cascade::computeProjection(const osg::Matrix& rttView,
 
     // finally, compute the projection matrix.
     // TODO: -dp may not always be enough of a near plane...? depends how high up the draped geom is.
-    _rttProj.makeOrtho(_minX, _maxX, _minY, _maxY, -dp, dp);
+    _rttProj.makeOrtho(_minX, _maxX, _minY, _maxY, -dp*4, dp);
 }
 
 // Computes the "coverage" of the RTT region in normalized [0..1] clip space.
@@ -632,7 +646,9 @@ DrapingDecorator::CameraLocal::traverse(osgUtil::CullVisitor* cv, DrapingDecorat
             h >= 4.5 && _maxCascades >= 4 ? 4 :
             h >= 3.0 && _maxCascades >= 3 ? 3 :
             h >= 1.5 && _maxCascades >= 2 ? 2 : 1;
+            //h >= 1.8 && _maxCascades >= 2 ? 2 : 1;
 
+#if 1
         // For the "camera looking mostly down" case, split the frustum in half to get
         // maximum coverage. Another hueristic tweak.
         if (_numCascades == 2 && camDotRtt > 0.5)
@@ -640,6 +656,7 @@ DrapingDecorator::CameraLocal::traverse(osgUtil::CullVisitor* cv, DrapingDecorat
             double m = _cascades[0]._maxClipY;
             _cascades[0]._maxClipY = _cascades[1]._minClipY = mix(m, 0, camDotRtt);
         }
+#endif
 
         _cascades[_numCascades-1]._maxClipY = 1.0;
     }
