@@ -56,6 +56,9 @@ namespace osgEarth
         //! Texture size for draping target (default=1024)
         void setTextureSize(unsigned value);
 
+        //! Whether to mipmap projected textures (default=false)
+        void setUseMipMaps(bool value);
+
         //! Debugging method (used by osgearth_overlayviewer to visualize cascades)
         osg::Node* getDump();
 
@@ -110,6 +113,7 @@ namespace osgEarth
         unsigned _multisamples;
         unsigned _maxCascades;
         unsigned _texSize;
+        bool _mipmapping;
         PerObjectFastMap<const osg::Camera*, CameraLocal> _data;
         osg::ref_ptr<osg::Group> _dump;
         bool _debug;
