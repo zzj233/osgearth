@@ -295,23 +295,35 @@ DrapingDecorator::CameraLocal::initialize(osg::Camera* camera, DrapingDecorator&
     unsigned textureWidth = decorator._texSize;
     unsigned textureHeight = decorator._texSize;
 
+    unsigned multiSamples;
+    osg::Texture::FilterMode filterMode;
+    osg::Vec4 clearColor;
+
     // if the master cam is a picker, just limit to one cascade with no sampling.
     bool isPickCamera = camera->getName() == "osgEarth::RTTPicker";
-
-    // picker? limit to one cascade.
-    _maxCascades = isPickCamera ? 1u : decorator._maxCascades;
-
-    // picker? disable multisamples.
-    unsigned multiSamples = isPickCamera ? 0u : decorator._multisamples;
+    if (isPickCamera)
+    {
+        _maxCascades = 1u; // limit to one cascade when picking
+        multiSamples = 0u; // no antialiasing allowed
+        filterMode = osg::Texture::NEAREST; // no texture filtering allowed
+        clearColor.set(0,0,0,0);
+    }
+    else
+    {
+        _maxCascades = decorator._maxCascades;
+        multiSamples = decorator._multisamples;
+        filterMode = osg::Texture::LINEAR;
+        clearColor.set(1,1,1,0);
+    }
 
     // Create the shared draping texture.
-    osg::Texture2DArray* tex = new DrapingTexture();
+    osg::Texture2DArray* tex = new osg::Texture2DArray(); //DrapingTexture();
     tex->setTextureSize(textureWidth, textureHeight, _maxCascades);
     tex->setInternalFormat(GL_RGBA);
     tex->setSourceFormat(GL_RGBA);
     tex->setSourceType(GL_UNSIGNED_BYTE);
-    tex->setFilter(tex->MIN_FILTER, tex->LINEAR);
-    tex->setFilter(tex->MAG_FILTER, tex->LINEAR);
+    tex->setFilter(tex->MIN_FILTER, filterMode);
+    tex->setFilter(tex->MAG_FILTER, filterMode);
     tex->setWrap(tex->WRAP_S, tex->CLAMP_TO_EDGE);
     tex->setWrap(tex->WRAP_T, tex->CLAMP_TO_EDGE);
 
@@ -334,7 +346,7 @@ DrapingDecorator::CameraLocal::initialize(osg::Camera* camera, DrapingDecorator&
         rttStateSet->setAttributeAndModes(depthOff.get());
         rttStateSet->setRenderBinDetails(1, "TraversalOrderBin", osg::StateSet::OVERRIDE_PROTECTED_RENDERBIN_DETAILS); //???
         rtt->setStateSet(rttStateSet);
-        rtt->setClearColor(osg::Vec4(1,1,1,0));
+        rtt->setClearColor(clearColor);
 
         if (decorator._debug && camera->getName() == "dump")
         {
