@@ -45,7 +45,7 @@ namespace osgEarth
     {
     public:
         //! Constructs a decorator
-        DrapingDecorator(TerrainResources*);
+        DrapingDecorator(const SpatialReference* srs, TerrainResources*);
 
         //! Sets the maximum number of texture cascases to use (default=4, max=4)
         void setMaxNumCascades(unsigned value);
@@ -117,6 +117,7 @@ namespace osgEarth
         PerObjectFastMap<const osg::Camera*, CameraLocal> _data;
         osg::ref_ptr<osg::Group> _dump;
         bool _debug;
+        osg::ref_ptr<const SpatialReference> _srs;
 
         // tracks drapable objects in the scene graph
         mutable DrapingManager _manager;

@@ -25,7 +25,6 @@
 #include <osgEarth/ClampingTechnique>
 #include <osgEarth/CullingUtils>
 #include <osgEarth/DrapeableNode>
-#include <osgEarth/DrapingTechnique>
 #include <osgEarth/MapNodeObserver>
 #include <osgEarth/MaskNode>
 #include <osgEarth/NodeUtils>
@@ -351,7 +350,7 @@ MapNode::init()
     _overlayDecorator->setTerrainEngine(_terrainEngine);
 
     // Set up Draping:
-    _drapingDecorator = new DrapingDecorator(_terrainEngine->getResources());
+    _drapingDecorator = new DrapingDecorator(getMapSRS(), _terrainEngine->getResources());
     _drapingDecorator->addChild(_terrainEngine);
     _overlayDecorator->addChild(_drapingDecorator);
 

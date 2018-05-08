@@ -48,13 +48,14 @@ using namespace osgEarth;
 // - Address the dangling CameraLocal when a view disappears
 // - Clamp maxExt to the frustum far plane extents
 
-DrapingDecorator::DrapingDecorator(TerrainResources* resources) :
+DrapingDecorator::DrapingDecorator(const SpatialReference* srs, TerrainResources* resources) :
 _unit(-1),
 _multisamples(4u),
 _maxCascades(4u),
 _texSize(1024u),
 _mipmapping(false),
 _debug(false),
+_srs(srs),
 _resources(resources)
 {
     if (::getenv("OSGEARTH_DRAPING_DEBUG"))
@@ -181,33 +182,6 @@ DrapingDecorator::getDump()
 
 namespace
 {
-    // Customized texture class will disable texture filtering when rendering under a pick camera.
-    class DrapingTexture : public osg::Texture2DArray
-    {
-    public:
-        virtual void apply(osg::State& state) const
-        {
-            const osg::StateSet::DefineList& defines = state.getDefineMap().currentDefines;
-            if (defines.find("OE_IS_PICK_CAMERA") != defines.end())
-            {
-                FilterMode minFilter = _min_filter;
-                FilterMode magFilter = _mag_filter;
-                DrapingTexture* ncThis = const_cast<DrapingTexture*>(this);
-                ncThis->_min_filter = NEAREST;
-                ncThis->_mag_filter = NEAREST;
-                ncThis->dirtyTextureParameters();
-                osg::Texture2DArray::apply(state);
-                ncThis->_min_filter = minFilter;
-                ncThis->_mag_filter = magFilter;
-                ncThis->dirtyTextureParameters();
-            }
-            else
-            {
-                osg::Texture2DArray::apply(state);
-            }
-        }
-    };
-
     /**
      * A camera that will traverse the per-thread DrapingCullSet instead of its own children.
      */
@@ -566,30 +540,50 @@ DrapingDecorator::CameraLocal::traverse(osgUtil::CullVisitor* cv, DrapingDecorat
     osg::Matrixd iCamMVP;
     iCamMVP.invert(camMVP);
 
-    // Compute "maxExt", the maximum theorectical extent of the draping region.
+    // The horizon plane
+    osg::Plane horizonPlane;
+
+    // distance to the visible horizon (in any direction)
+    double dh;
+
+    // distance from the camera to the horizon plane (straight down)
+    double dp;
+    
+    // Maximum theorectical extent of the draping region.
     // The horizon plane is the plane passing through the ellipsoid's
     // visible horizon in all directions from the eyepoint.
     // "maxExt" is the distance from the eyepoint to the visible horizon
     // projected into the horizon plane. This the largest possible extent we will need for RTT.
-    osg::Plane horizonPlane;
-    Horizon* horizon = Horizon::get(*cv);
-    horizon->getPlane(horizonPlane);
-    double dh = horizon->getDistanceToVisibleHorizon();
-    double dp = horizonPlane.distance(camEye);
-    double m = sqrt(dh*dh - dp*dp);    
     osg::Vec2d maxExt;
+
+    if (decorator._srs->isGeographic())
+    {
+        Horizon* horizon = Horizon::get(*cv);
+        horizon->getPlane(horizonPlane);
+        dh = horizon->getDistanceToVisibleHorizon();
+        dp = horizonPlane.distance(camEye);
+    }
+
+    else
+    {
+        // in projected mode, simulate it.
+        dp = osg::maximum(camEye.z(), 100.0);
+        dh = sqrt(2.0*6356752.3142*dp + dp*dp);
+        horizonPlane.set(osg::Vec3d(0,0,1), dp);
+    }
+
+    double m = sqrt(dh*dh - dp*dp);    
     maxExt.set(m, m);
 
     // Create a view matrix that looks straight down at the horizon plane form the eyepoint.
     // This will be our RTT view matrix for the draping cameras.
     osg::Matrix rttView;
     osg::Vec3d center(0, 0, 0);
-    osg::Vec3d up = camLook;
+    osg::Vec3d camLeft = camUp ^ camLook;
     osg::Vec3d rttLook = -horizonPlane.getNormal();
-    double camDotRtt = fabs(camLook * rttLook);
-    if (camDotRtt > 0.9999)
-        up.set(camUp);
-    rttView.makeLookAt(camEye, camEye + rttLook, up);
+    osg::Vec3d rttUp = rttLook ^ camLeft;
+    rttView.makeLookAt(camEye, camEye + rttLook, rttUp);
+
     //TODO: projected mode
 
     // "maxExt" is a theoretical max. Now we will constrain it based on the actual far clip plane.
@@ -651,6 +645,7 @@ DrapingDecorator::CameraLocal::traverse(osgUtil::CullVisitor* cv, DrapingDecorat
 #if 1
         // For the "camera looking mostly down" case, split the frustum in half to get
         // maximum coverage. Another hueristic tweak.
+        double camDotRtt = camLook * rttLook;
         if (_numCascades == 2 && camDotRtt > 0.5)
         {
             double m = _cascades[0]._maxClipY;
