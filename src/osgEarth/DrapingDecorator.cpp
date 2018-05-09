@@ -253,29 +253,30 @@ namespace
 
 DrapingDecorator::CameraLocal::~CameraLocal()
 {
-    //osg::ref_ptr<osg::Camera> camera;
-    //if (_token.lock(camera))
-    //{
-    //    camera->removeObserver(this);
-    //}
+    osg::ref_ptr<osg::Camera> camera;
+    if (_token.lock(camera))
+    {
+        camera->removeObserver(this);
+    }
 }
 
 void
 DrapingDecorator::CameraLocal::objectDeleted(void* ptr)
 {
-    //OE_WARN << "CameraLocal::objectDeleted" << std::endl;
-    //for (unsigned i = 0; i < 4; ++i)
-    //{
-    //    _cascades[i]._rtt = 0L;
-    //    _terrainSS = 0L;
-    //}
+    OE_DEBUG << "CameraLocal::objectDeleted" << std::endl;
+    for (unsigned i = 0; i < 4; ++i)
+    {
+        _cascades[i]._rtt = 0L;
+        _terrainSS = 0L;
+    }
 }
 
 void
 DrapingDecorator::CameraLocal::initialize(osg::Camera* camera, DrapingDecorator& decorator)
 {
-    // testing ... doesn't work on exit
-    //camera->getOrCreateObserverSet()->addObserver(this);
+    // set up the auto-delete of orphaned cameras
+    _token = camera;
+    camera->getOrCreateObserverSet()->addObserver(this);
 
     unsigned textureWidth = decorator._texSize;
     unsigned textureHeight = decorator._texSize;
@@ -304,35 +305,43 @@ DrapingDecorator::CameraLocal::initialize(osg::Camera* camera, DrapingDecorator&
     }
 
     // Create the shared draping texture.
-    osg::Texture2DArray* tex = new osg::Texture2DArray(); //DrapingTexture();
-    tex->setTextureSize(textureWidth, textureHeight, _maxCascades);
+    osg::Texture2DArray* tex = new osg::Texture2DArray();
+    tex->setTextureSize(textureWidth, textureHeight, 4u); //_maxCascades);
     tex->setInternalFormat(GL_RGBA);
     tex->setSourceFormat(GL_RGBA);
     tex->setSourceType(GL_UNSIGNED_BYTE);
+    tex->setResizeNonPowerOfTwoHint(false);
     tex->setFilter(tex->MIN_FILTER, minifyFilter);
     tex->setFilter(tex->MAG_FILTER, tex->LINEAR);
     tex->setWrap(tex->WRAP_S, tex->CLAMP_TO_EDGE);
     tex->setWrap(tex->WRAP_T, tex->CLAMP_TO_EDGE);
-
+    tex->setMaxAnisotropy(4.0f);
+    
+    // set up the global RTT camera state:
+    _rttSS = new osg::StateSet();
     osg::StateAttribute::OverrideValue forceOff = osg::StateAttribute::OFF | osg::StateAttribute::PROTECTED | osg::StateAttribute::OVERRIDE;
     osg::StateAttribute::OverrideValue forceOn  = osg::StateAttribute::OFF | osg::StateAttribute::PROTECTED | osg::StateAttribute::OVERRIDE;
     
-    // separate blending
-    osg::ref_ptr<osg::BlendFunc> blend = new osg::BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+    // blending:
+    _rttSS->setAttributeAndModes(
+        new osg::BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA),
+        forceOn);
 
     // disable depth reads and writes for the draped geometry
-    osg::ref_ptr<osg::Depth> depthOff = new osg::Depth(osg::Depth::ALWAYS, 0, 1, false);
+    _rttSS->setAttributeAndModes(
+        new osg::Depth(osg::Depth::ALWAYS, 0, 1, false),
+        forceOn);
+
+    // no lighting:
+    Lighting::set(_rttSS.get(), forceOff);
+
+    // force traversal order rendering (???)
+    _rttSS->setRenderBinDetails(1, "TraversalOrderBin", osg::StateSet::OVERRIDE_PROTECTED_RENDERBIN_DETAILS);
 
     for (unsigned i = 0; i < _maxCascades; ++i)
     {
         osg::ref_ptr<osg::Camera> rtt = new DrapingCamera(decorator._manager);
 
-        osg::StateSet* rttStateSet = new osg::StateSet();
-        rttStateSet->setDefine(OE_LIGHTING_DEFINE, forceOff);
-        rttStateSet->setAttributeAndModes(blend.get(), forceOn);
-        rttStateSet->setAttributeAndModes(depthOff.get());
-        rttStateSet->setRenderBinDetails(1, "TraversalOrderBin", osg::StateSet::OVERRIDE_PROTECTED_RENDERBIN_DETAILS); //???
-        rtt->setStateSet(rttStateSet);
         rtt->setClearColor(clearColor);
 
         if (decorator._debug && camera->getName() == "dump")
@@ -347,6 +356,7 @@ DrapingDecorator::CameraLocal::initialize(osg::Camera* camera, DrapingDecorator&
                 rtt->setClearColor(osg::Vec4(1,0,1,0.15));
         }
 
+        rtt->setGraphicsContext(camera->getGraphicsContext());
         rtt->setReferenceFrame(rtt->ABSOLUTE_RF_INHERIT_VIEWPOINT);
         rtt->setViewport(0, 0, textureWidth, textureHeight);
         rtt->setRenderOrder(rtt->PRE_RENDER);
@@ -519,7 +529,7 @@ DrapingDecorator::CameraLocal::traverse(osgUtil::CullVisitor* cv, DrapingDecorat
     osg::Camera* camera = cv->getCurrentCamera();
 
     // first time through, intiailize the RTT cameras.
-    if (_cascades[0]._rtt.valid() == false)
+    if (_rttSS.valid() == false)
     {
         initialize(camera, decorator);
     }
@@ -531,29 +541,32 @@ DrapingDecorator::CameraLocal::traverse(osgUtil::CullVisitor* cv, DrapingDecorat
     osg::Vec3d camLook = camCenter-camEye;
     camLook.normalize();
 
-    // Basic camera matrices:
+    // camera modelview matrix (world -> view)
     const osg::Matrix& camMV = *cv->getModelViewMatrix();
+
+    // camera projection matrix (from previous frame)
     const osg::Matrix& camProj = _projMatrixLastFrame;
+
+    // camera world -> clip
     osg::Matrixd camMVP = camMV * camProj;
 
     // camera clip -> world
     osg::Matrixd iCamMVP;
     iCamMVP.invert(camMVP);
 
-    // The horizon plane
+    // horizon plane (world space) - the plane passing through the
+    // ellipsoid's visible horizon in all directions from the camera.
     osg::Plane horizonPlane;
 
     // distance to the visible horizon (in any direction)
     double dh;
 
-    // distance from the camera to the horizon plane (straight down)
+    // shortest distance from the camera to the horizon plane (straight down)
     double dp;
     
-    // Maximum theorectical extent of the draping region.
-    // The horizon plane is the plane passing through the ellipsoid's
-    // visible horizon in all directions from the eyepoint.
-    // "maxExt" is the distance from the eyepoint to the visible horizon
-    // projected into the horizon plane. This the largest possible extent we will need for RTT.
+    // Maximum theorectical extent of the draping region; i.e. the distance
+    // from the camera to the visible horizon projected onto the horizon plane.
+    // This the largest possible extent we will need for RTT.
     osg::Vec2d maxExt;
 
     if (decorator._srs->isGeographic())
@@ -563,37 +576,36 @@ DrapingDecorator::CameraLocal::traverse(osgUtil::CullVisitor* cv, DrapingDecorat
         dh = horizon->getDistanceToVisibleHorizon();
         dp = horizonPlane.distance(camEye);
     }
-
     else
     {
-        // in projected mode, simulate it.
+        // in projected mode, the horizon is at an infinite distance, so
+        // we need to simulate it.
         dp = osg::maximum(camEye.z(), 100.0);
         dh = sqrt(2.0*6356752.3142*dp + dp*dp);
         horizonPlane.set(osg::Vec3d(0,0,1), dp);
     }
 
+    // project visible horizon distance into the horizon plane:
     double m = sqrt(dh*dh - dp*dp);    
     maxExt.set(m, m);
 
     // Create a view matrix that looks straight down at the horizon plane form the eyepoint.
-    // This will be our RTT view matrix for the draping cameras.
+    // This will be our view matrix for all RTT draping cameras.
     osg::Matrix rttView;
-    osg::Vec3d center(0, 0, 0);
-    osg::Vec3d camLeft = camUp ^ camLook;
     osg::Vec3d rttLook = -horizonPlane.getNormal();
+    osg::Vec3d camLeft = camUp ^ camLook;
     osg::Vec3d rttUp = rttLook ^ camLeft;
     rttView.makeLookAt(camEye, camEye + rttLook, rttUp);
 
-    //TODO: projected mode
-
-    // "maxExt" is a theoretical max. Now we will constrain it based on the actual far clip plane.
+    // so far, maxExt is a theoretical max. Now we can constrain it based on
+    // the actual far clip plane.
     constrainMaxExtToFrustum(iCamMVP, rttView, maxExt);
 
     // camera view -> world
     osg::Matrix iCamMV;
     iCamMV.invert(camMV);
 
-    // this xforms from clip [-1..1] to texture [0..1] space
+    // xform from clip [-1..1] to texture [0..1] space
     static const osg::Matrix clipToTex =
         osg::Matrix::translate(1.0, 1.0, 1.0) *
         osg::Matrix::scale(0.5, 0.5, 0.5);
@@ -606,7 +618,7 @@ DrapingDecorator::CameraLocal::traverse(osgUtil::CullVisitor* cv, DrapingDecorat
     _cascades[0]._maxClipY =  1.0;
     _cascades[0].computeProjection(rttView, iCamMVP, horizonPlane, dp, maxExt, -maxExt.y());
 
-    // NEXT. Compute the extent, in pixels, of the full RTT. If it's larger than our
+    // Next compute the extent, in pixels, of the full RTT. If it's larger than our
     // texture cascade size, we may need multiple cascases.
     _cascades[0].computeClipCoverage(rttView, camMVP);
 
@@ -640,9 +652,7 @@ DrapingDecorator::CameraLocal::traverse(osgUtil::CullVisitor* cv, DrapingDecorat
             h >= 4.5 && _maxCascades >= 4 ? 4 :
             h >= 3.0 && _maxCascades >= 3 ? 3 :
             h >= 1.5 && _maxCascades >= 2 ? 2 : 1;
-            //h >= 1.8 && _maxCascades >= 2 ? 2 : 1;
 
-#if 1
         // For the "camera looking mostly down" case, split the frustum in half to get
         // maximum coverage. Another hueristic tweak.
         double camDotRtt = camLook * rttLook;
@@ -651,12 +661,12 @@ DrapingDecorator::CameraLocal::traverse(osgUtil::CullVisitor* cv, DrapingDecorat
             double m = _cascades[0]._maxClipY;
             _cascades[0]._maxClipY = _cascades[1]._minClipY = mix(m, 0, camDotRtt);
         }
-#endif
 
         _cascades[_numCascades-1]._maxClipY = 1.0;
     }
 
-    // For each actice cascade, build the texture projection matrix
+    // For each active cascade, configure its RTT camera and build the
+    // texture projection matrix
     unsigned i;
     for (i = 0; i < _numCascades; ++i)
     {
@@ -688,9 +698,14 @@ DrapingDecorator::CameraLocal::traverse(osgUtil::CullVisitor* cv, DrapingDecorat
     }
 
     // traverse and write to the texture.
-    for (unsigned i = 0; i < _numCascades; ++i)
+    if (_numCascades > 0u)
     {
-        _cascades[i]._rtt->accept(*cv);
+        cv->pushStateSet(_rttSS.get());
+        for (unsigned i = 0; i < _numCascades; ++i)
+        {
+            _cascades[i]._rtt->accept(*cv);
+        }
+        cv->popStateSet(); // _rttSS
     }
 }
 

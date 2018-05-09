@@ -82,21 +82,20 @@ namespace osgEarth
             void computeClipCoverage(const osg::Matrix&, const osg::Matrix&);
 
             osg::ref_ptr<osg::Camera> _rtt;
-            osg::Matrix _rttView;
             osg::Matrix _rttProj;
         };
 
         // RTT configuration for a single master camera.
-        // (i.e. there will be one of these for each scene camera that traverses DrapingDecorator)
+        // (i.e. there will be one of these for each Camera that traverses DrapingDecorator)
         struct CameraLocal : public osg::Observer
         {
             Cascade _cascades[4];
             unsigned _numCascades;
             unsigned _maxCascades;
+            osg::ref_ptr<osg::StateSet> _rttSS;
             osg::ref_ptr<osg::StateSet> _terrainSS;
             osg::Matrix _projMatrixLastFrame;
 
-            bool initialized() const;
             void initialize(osg::Camera* camera, DrapingDecorator&);
             void traverse(osgUtil::CullVisitor*, DrapingDecorator&);
             void clear();
