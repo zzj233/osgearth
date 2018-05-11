@@ -28,6 +28,7 @@
 #include <osgEarth/Shaders>
 #include <osgEarth/TerrainResources>
 #include <osgEarth/ShaderUtils>
+#include <osgEarth/Lighting>
 
 #include <osg/Texture2D>
 #include <osg/Texture2DArray>
@@ -333,7 +334,7 @@ DrapingDecorator::CameraLocal::initialize(osg::Camera* camera, DrapingDecorator&
         forceOn);
 
     // no lighting:
-    Lighting::set(_rttSS.get(), forceOff);
+    _rttSS->setDefine(OE_LIGHTING_DEFINE, osg::StateAttribute::OFF);
 
     // force traversal order rendering (???)
     _rttSS->setRenderBinDetails(1, "TraversalOrderBin", osg::StateSet::OVERRIDE_PROTECTED_RENDERBIN_DETAILS);
