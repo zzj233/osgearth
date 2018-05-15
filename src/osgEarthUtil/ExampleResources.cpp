@@ -43,6 +43,7 @@
 #include <osgEarth/TerrainEngineNode>
 #include <osgEarth/NodeUtils>
 #include <osgEarth/FileUtils>
+#include <osgEarth/GLUtils>
 
 #include <osgEarth/XmlUtils>
 #include <osgEarth/StringUtils>
@@ -339,16 +340,10 @@ MapNodeHelper::load(osg::ArgumentParser&   args,
 #ifdef OSG_GL3_AVAILABLE
     if (viewer)
     {
-        viewer->realize();
-        for (osgViewer::Viewer::Views::iterator view = views.begin(); view != views.end(); ++view)
-        {
-            osg::State* state = (*view)->getCamera()->getGraphicsContext()->getState();
-            state->setUseModelViewAndProjectionUniforms(true);
-            state->setUseVertexAttributeAliasing(true);
-        }        
+        viewer->setRealizeOperation(new GL3RealizeOperation());
     }
 #endif
-    
+
     return root;
 }
 
@@ -707,6 +702,9 @@ MapNodeHelper::parse(MapNode*             mapNode,
 void
 MapNodeHelper::configureView( osgViewer::View* view ) const
 {
+    // default uniform values:
+    GLUtils::setGlobalDefaults(view->getCamera()->getOrCreateStateSet());
+
     // add some stock OSG handlers:
     view->addEventHandler(new osgViewer::StatsHandler());
     view->addEventHandler(new osgViewer::WindowSizeHandler());
