@@ -51,7 +51,7 @@ using namespace osgEarth;
 
 DrapingDecorator::DrapingDecorator(const SpatialReference* srs, TerrainResources* resources) :
 _unit(-1),
-_multisamples(4u),
+_multisamples(2u),
 _maxCascades(4u),
 _texSize(1024u),
 _mipmapping(false),
@@ -64,15 +64,19 @@ _resources(resources)
 
     const char* c = ::getenv("OSGEARTH_DRAPING_TEXTURE_SIZE");
     if (c)
-        setTextureSize(osg::clampBetween((unsigned)atoi(c), 256u, 4096u));
+        setTextureSize((unsigned)atoi(c));
 
     c = ::getenv("OSGEARTH_DRAPING_MAX_CASCADES");
     if (c)
-        setMaxNumCascades(osg::clampBetween((unsigned)atoi(c), 1u, 4u));
+        setMaxNumCascades((unsigned)atoi(c));
 
     c = ::getenv("OSGEARTH_DRAPING_MIPMAPPING");
     if (c)
-        setUseMipMaps(true);
+        setUseMipMaps(atoi(c)? true : false);
+
+    c = ::getenv("OSGEARTH_DRAPING_MULTISAMPLES");
+    if (c)
+        setNumMultiSamples((unsigned)atoi(c));
 }
 
 void
@@ -84,7 +88,7 @@ DrapingDecorator::setMaxNumCascades(unsigned value)
 void
 DrapingDecorator::setNumMultiSamples(unsigned value)
 {
-    _multisamples = osg::clampBetween(value, 0u, 8u);
+    _multisamples = osg::clampBetween(value, 0u, 4u);
 }
 
 void
@@ -363,7 +367,10 @@ DrapingDecorator::CameraLocal::initialize(osg::Camera* camera, DrapingDecorator&
         rtt->setRenderOrder(rtt->PRE_RENDER);
         rtt->setRenderTargetImplementation(rtt->FRAME_BUFFER_OBJECT);
         rtt->setComputeNearFarMode(rtt->DO_NOT_COMPUTE_NEAR_FAR);
-        rtt->setImplicitBufferAttachmentMask(0, 0); // no depth buffer
+        rtt->setImplicitBufferAttachmentMask(0, 0); // no implicit attachments!
+        
+        rtt->setDrawBuffer(GL_FRONT);
+        rtt->setReadBuffer(GL_FRONT);
 
         rtt->attach(
             rtt->COLOR_BUFFER,        // target
