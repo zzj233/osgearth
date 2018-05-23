@@ -20,7 +20,6 @@
 * along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
 #include <osgEarth/DrapingDecorator>
-#include <osgEarth/Lighting>
 #include <osgEarth/Registry>
 #include <osgEarth/Capabilities>
 #include <osgEarth/Horizon>
@@ -28,7 +27,8 @@
 #include <osgEarth/Shaders>
 #include <osgEarth/TerrainResources>
 #include <osgEarth/ShaderUtils>
-#include <osgEarth/Lighting>
+#include <osgEarth/LineDrawable>
+#include <osgEarth/GLUtils>
 
 #include <osg/Texture2D>
 #include <osg/Texture2DArray>
@@ -283,8 +283,8 @@ DrapingDecorator::CameraLocal::initialize(osg::Camera* camera, DrapingDecorator&
     _token = camera;
     camera->getOrCreateObserverSet()->addObserver(this);
 
-    unsigned textureWidth = decorator._texSize;
-    unsigned textureHeight = decorator._texSize;
+    unsigned textureWidth;
+    unsigned textureHeight;
 
     unsigned multiSamples;
     osg::Texture::FilterMode minifyFilter;
@@ -295,7 +295,9 @@ DrapingDecorator::CameraLocal::initialize(osg::Camera* camera, DrapingDecorator&
     bool isPickCamera = camera->getName() == "osgEarth::RTTPicker";
     if (isPickCamera)
     {
-        _maxCascades = 1u; // limit to one cascade when picking
+        textureWidth = osg::minimum(512u, decorator._texSize);
+        textureHeight = osg::minimum(512u, decorator._texSize);
+        _maxCascades = 2u; // limit to one cascade when picking
         multiSamples = 0u; // no antialiasing allowed
         minifyFilter = osg::Texture::NEAREST; // no texture filtering allowed
         clearColor.set(0,0,0,0);
@@ -303,6 +305,8 @@ DrapingDecorator::CameraLocal::initialize(osg::Camera* camera, DrapingDecorator&
     }
     else
     {
+        textureWidth = decorator._texSize;
+        textureHeight = decorator._texSize;
         _maxCascades = decorator._maxCascades;
         multiSamples = decorator._multisamples;
         minifyFilter = mipmapping? osg::Texture::LINEAR_MIPMAP_LINEAR : osg::Texture::LINEAR;
@@ -332,16 +336,10 @@ DrapingDecorator::CameraLocal::initialize(osg::Camera* camera, DrapingDecorator&
         new osg::BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA),
         forceOn);
 
-    // disable depth reads and writes for the draped geometry
-    _rttSS->setAttributeAndModes(
-        new osg::Depth(osg::Depth::ALWAYS, 0, 1, false),
-        forceOn);
-
-    // no lighting:
-    _rttSS->setDefine(OE_LIGHTING_DEFINE, osg::StateAttribute::OFF);
-
-    // force traversal order rendering (???)
-    _rttSS->setRenderBinDetails(1, "TraversalOrderBin", osg::StateSet::OVERRIDE_PROTECTED_RENDERBIN_DETAILS);
+    // Ignore any shaders coming into the RTT
+    // Someday, if we want a user-shader on the draped geometry itself, it would go here.
+    VirtualProgram* rttVP = VirtualProgram::getOrCreate(_rttSS.get());
+    rttVP->setInheritShaders(false);
 
     for (unsigned i = 0; i < _maxCascades; ++i)
     {
@@ -368,7 +366,6 @@ DrapingDecorator::CameraLocal::initialize(osg::Camera* camera, DrapingDecorator&
         rtt->setRenderTargetImplementation(rtt->FRAME_BUFFER_OBJECT);
         rtt->setComputeNearFarMode(rtt->DO_NOT_COMPUTE_NEAR_FAR);
         rtt->setImplicitBufferAttachmentMask(0, 0); // no implicit attachments!
-        
         rtt->setDrawBuffer(GL_FRONT);
         rtt->setReadBuffer(GL_FRONT);
 
@@ -379,6 +376,8 @@ DrapingDecorator::CameraLocal::initialize(osg::Camera* camera, DrapingDecorator&
             i,                        // texture array index
             mipmapping,               // mipmapping
             multiSamples);            // antialiasing multi-samples
+
+        // Note: No depth buffer.
 
         // Set this so we can detect the RTT camera's parent for the DrapingCamera and
         // for things like auto-scaling, picking, etc.
@@ -397,10 +396,10 @@ DrapingDecorator::CameraLocal::initialize(osg::Camera* camera, DrapingDecorator&
     _terrainSS->getOrCreateUniform("oe_Draping_tex", osg::Uniform::SAMPLER_2D)->set((int)decorator._unit);
     
     // install the shader program to project a texture on the terrain
-    VirtualProgram* vp = VirtualProgram::getOrCreate(_terrainSS.get());
-    vp->setName("Draping");
+    VirtualProgram* drapingShader = VirtualProgram::getOrCreate(_terrainSS.get());
+    drapingShader->setName("Draping");
     Shaders shaders;
-    shaders.load(vp, shaders.Draping);
+    shaders.load(drapingShader, shaders.Draping);
 }
 
 void
@@ -721,7 +720,7 @@ void
 DrapingDecorator::CameraLocal::dump(const osg::Camera* cam, DrapingDecorator& decorator)
 {
     static const char* fn = "DrapingDecoratorDump.osgb";
-
+ 
     decorator._dump = new osg::Group();
 
     // Main camera:
