@@ -83,7 +83,6 @@ namespace
         }
     };
 
-
     // it's not used by osgEarth, but you can copy this code into a viewer app and
     // use it to visualize the various polyhedra created by the overlay decorator.
     // see the end of OverlayDecorator::cull for the dump types.
@@ -112,13 +111,17 @@ namespace
                     // so we need to override it.
                     osg::Group* g = new osg::Group();
                     osg::StateSet* gss = g->getOrCreateStateSet();
+#ifdef OSG_GL_FIXED_FUNCTION_AVAILABLE
                     gss->setAttributeAndModes(new osg::LineWidth(1.5f), 1);
+#endif
                     gss->setRenderBinDetails(90210, "DepthSortedBin");
 
                     osg::Group* g0 = new osg::Group();
                     g->addChild( g0 );
                     osg::StateSet* g0ss = g0->getOrCreateStateSet();
+#ifdef OSG_GL_FIXED_FUNCTION_AVAILABLE
                     g0ss->setAttributeAndModes(new osg::LineStipple(1, 0x000F), 1);
+#endif
                     g0->addChild( dump );
 
                     osg::Group* g1 = new osg::Group();
