@@ -18,24 +18,16 @@ osgEarth Sample
     </feature_source>
     
     <feature_model name="world_boundaries" feature_source="world-data">
-        
-        <layout tile_size="500000" crop_features="true" paged="true">
-            <level max_range="1e10"/>
-        </layout>
-                
         <styles>
             <style type="text/css">
                 world {
                    stroke:                   #ffff00;
                    stroke-width:             3px;
                    stroke-tessellation-size: 1km;
-                   render-lighting:          false;
-                   altitude-clamping:        terrain-gpu;
-                   render-depth-offset:      true;                   
+                   altitude-clamping:        terrain-drape;          
                 }            
             </style>
         </styles>
-        
     </feature_model>
   
 </map>
