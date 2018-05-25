@@ -35,6 +35,9 @@ using namespace OpenThreads;
 FeatureSourceOptions::FeatureSourceOptions(const ConfigOptions& options) :
 DriverConfigOptions( options )
 {
+    if (getDriver().empty())
+        setDriver("ogr");
+
     fromConfig( _conf );
 }
 
