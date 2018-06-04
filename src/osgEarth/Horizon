@@ -113,6 +113,11 @@ namespace osgEarth
 
         //! Caclulate distance from eye to visible horizon
         double getDistanceToVisibleHorizon() const;
+
+        /**
+         * Gets the radius of the ellipsoid under the eye
+         */
+        double getRadius() const;
         
     protected:
 
