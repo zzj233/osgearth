@@ -193,7 +193,8 @@ namespace
     class DrapingCamera : public osg::Camera
     {
     public:
-        DrapingCamera(DrapingManager& dm) : osg::Camera(), _dm(dm)
+        DrapingCamera(DrapingManager& dm, const osg::Camera* parentCamera) 
+            : osg::Camera(), _parentCamera(parentCamera), _dm(dm)
         {
             setCullingActive( false );
         }
@@ -202,13 +203,13 @@ namespace
 
         void traverse(osg::NodeVisitor& nv)
         {
-            const osg::Camera* parentCamera = this->getView()->getCamera();
-            DrapingCullSet& cullSet = _dm.get(parentCamera);
+            DrapingCullSet& cullSet = _dm.get(_parentCamera);
             cullSet.accept( nv );
         }
 
     protected:
         virtual ~DrapingCamera() { }
+        const osg::Camera* _parentCamera;
         DrapingManager& _dm;
     };
 
@@ -336,14 +337,13 @@ DrapingDecorator::CameraLocal::initialize(osg::Camera* camera, DrapingDecorator&
         new osg::BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA),
         forceOn);
 
-    // Ignore any shaders coming into the RTT
-    // Someday, if we want a user-shader on the draped geometry itself, it would go here.
-    VirtualProgram* rttVP = VirtualProgram::getOrCreate(_rttSS.get());
-    rttVP->setInheritShaders(false);
+    // Cannot do this because it will break picking -gw
+    //VirtualProgram* rttVP = VirtualProgram::getOrCreate(_rttSS.get());
+    //rttVP->setInheritShaders(false);
 
     for (unsigned i = 0; i < _maxCascades; ++i)
     {
-        osg::ref_ptr<osg::Camera> rtt = new DrapingCamera(decorator._manager);
+        osg::ref_ptr<osg::Camera> rtt = new DrapingCamera(decorator._manager, camera);
 
         rtt->setClearColor(clearColor);
 
@@ -381,6 +381,7 @@ DrapingDecorator::CameraLocal::initialize(osg::Camera* camera, DrapingDecorator&
 
         // Set this so we can detect the RTT camera's parent for the DrapingCamera and
         // for things like auto-scaling, picking, etc.
+        // GW: unnecessary unless we want to eventually share RTT cameras?
         rtt->setView(camera->getView());
 
         // no addChild() because the DrapingCamera will automatically traverse the current cull set
