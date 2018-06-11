@@ -113,6 +113,7 @@ namespace osgEarth
         unsigned _maxCascades;
         unsigned _texSize;
         bool _mipmapping;
+        double _maxHorizonDistance;
         PerObjectFastMap<const osg::Camera*, CameraLocal> _data;
         osg::ref_ptr<osg::Group> _dump;
         bool _debug;
