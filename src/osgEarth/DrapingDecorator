@@ -78,8 +78,9 @@ namespace osgEarth
             double _widthNDC, _heightNDC;
 
             void expandToInclude(const osg::Vec3d&);
-            void computeProjection(const osg::Matrix&, const osg::Matrix&, const osg::Plane&, double, const osg::Vec2d&, double);
+            void computeProjection(const osg::Matrix&, const osg::Matrix&, const osg::EllipsoidModel&, const osg::Plane&, double, const osg::Vec2d&, double, bool debug);
             void computeClipCoverage(const osg::Matrix&, const osg::Matrix&);
+            void makeProj(double dp);
 
             osg::ref_ptr<osg::Camera> _rtt;
             osg::Matrix _rttProj;
@@ -89,7 +90,7 @@ namespace osgEarth
         // (i.e. there will be one of these for each Camera that traverses DrapingDecorator)
         struct CameraLocal : public osg::Observer
         {
-            Cascade _cascades[4];
+            Cascade _cascades[8];
             unsigned _numCascades;
             unsigned _maxCascades;
             osg::ref_ptr<osg::StateSet> _rttSS;

@@ -23,6 +23,7 @@ void oe_Draping_VS(inout vec4 vertexView)
 #pragma vp_order      0.6
 
 #pragma import_defines(OE_IS_PICK_CAMERA)
+#pragma import_defines(OE_DRAPING_MAX_CASCADES)
 
 uniform sampler2DArray oe_Draping_tex;
 uniform mat4 oe_Draping_texMatrix[4];
@@ -33,7 +34,7 @@ void oe_Draping_FS(inout vec4 color)
     vec4 texel = vec4(0,0,0,0);
 
     // the [3][3] slot will be zero if we have exceeded the current number of cascades
-    for (int i=0; i<4 && oe_Draping_texMatrix[i][3][3] != 0; ++i)
+    for (int i=0; i<OE_DRAPING_MAX_CASCADES && oe_Draping_texMatrix[i][3][3] != 0; ++i)
     {
         vec4 coord = oe_Draping_texMatrix[i] * oe_Draping_vertexView;
         coord.xy /= coord.w;
