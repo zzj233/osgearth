@@ -74,11 +74,12 @@ namespace osgEarth
         struct Cascade
         {
             double _minClipY, _maxClipY;
-            double _minX, _minY, _maxX, _maxY;
+            //double _minX, _minY, _maxX, _maxY;
+            osg::BoundingBoxd _box;
             double _widthNDC, _heightNDC;
 
             void expandToInclude(const osg::Vec3d&);
-            void computeProjection(const osg::Matrix&, const osg::Matrix&, const osg::EllipsoidModel&, const osg::Plane&, double, const osg::Vec2d&, double, bool debug);
+            void computeProjection(const osg::Matrix&, const osg::Matrix&, const osg::EllipsoidModel&, const osg::Plane&, double, const osg::Vec2d&, double, const osg::BoundingBoxd&, bool debug);
             void computeClipCoverage(const osg::Matrix&, const osg::Matrix&);
             void makeProj(double dp);
 
@@ -98,9 +99,10 @@ namespace osgEarth
             osg::Matrix _projMatrixLastFrame;
 
             void initialize(osg::Camera* camera, DrapingDecorator&);
-            void traverse(osgUtil::CullVisitor*, DrapingDecorator&);
+            void traverse(osgUtil::CullVisitor*, DrapingDecorator&, const osg::BoundingSphere&);
             void clear();
-            void constrainMaxExtToFrustum(const osg::Matrix&, const osg::Matrix&, osg::Vec2d&);
+            void constrainMaxExtToFrustum(const osg::Matrix&, const osg::Matrix&, bool, osg::Vec2d&, osg::BoundingBoxd& rttBox);
+            void constrainMaxExtToBounds(const osg::Matrix&, const osg::BoundingSphere&, osg::Vec2d&, osg::BoundingBoxd& rttBox);
 
             void dump(const osg::Camera* cam, DrapingDecorator&);
 
@@ -119,6 +121,8 @@ namespace osgEarth
         osg::ref_ptr<osg::Group> _dump;
         bool _debug;
         osg::ref_ptr<const SpatialReference> _srs;
+        bool _constrainMaxYToFrustum;
+        bool _constrainMaxExtToBounds;
 
         // tracks drapable objects in the scene graph
         mutable DrapingManager _manager;
