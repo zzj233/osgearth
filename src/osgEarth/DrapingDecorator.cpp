@@ -412,7 +412,7 @@ DrapingDecorator::CameraLocal::initialize(osg::Camera* camera, DrapingDecorator&
     
     // blending:
     _rttSS->setAttributeAndModes(
-        new osg::BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA),
+        new osg::BlendFunc(GL_SRC_COLOR, GL_ONE_MINUS_SRC_COLOR, GL_ONE, GL_ONE_MINUS_SRC_ALPHA),
         forceOn);
 
     // Cannot do this because it will break picking -gw
