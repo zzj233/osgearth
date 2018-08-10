@@ -67,6 +67,10 @@ namespace osgEarth
         void setStippleFactor(GLint factor);
         GLint getStippleFactor() const { return _factor; }
 
+        //! Line smoothing (antialiasing)
+        void setLineSmooth(bool value);
+        bool getLineSmooth() const { return _smooth; }
+
         //! Sets the overall color of the line
         void setColor(const osg::Vec4& color);
         const osg::Vec4& getColor() const { return _color; }
@@ -106,6 +110,10 @@ namespace osgEarth
         //! to the array directly!
         template<typename T>
         void pushVertexAttrib(T* vaa, const typename T::ElementDataType& value);
+
+        //! Gets the value of the vertex attribute from an array at index i
+        template<typename T>
+        const typename T::ElementDataType& getVertexAttrib(const T* vaa, unsigned i) const;
 
         //! Pre-allocate space for vertices
         void reserve(unsigned size);
@@ -166,6 +174,7 @@ namespace osgEarth
         GLint _factor;
         GLushort _pattern;
         float _width;
+        bool _smooth;
         unsigned _first;
         unsigned _count;
         osg::Vec3Array* _current;
@@ -180,6 +189,7 @@ namespace osgEarth
 
         unsigned actualVertsPerVirtualVert(unsigned) const;
         unsigned numVirtualVerts(const osg::Array*) const;
+        unsigned getRealIndex(unsigned) const;
         void updateFirstCount();
 
         static osg::ref_ptr<osg::StateSet> _gpuStateSet;
@@ -241,6 +251,12 @@ namespace osgEarth
         unsigned num = actualVertsPerVirtualVert(nvv);
         for (unsigned i = 0; i<num; ++i)
             vaa->push_back(value);
+    }
+
+    template<typename T>
+    const typename T::ElementDataType& LineDrawable::getVertexAttrib(const T* vaa, unsigned i) const
+    {
+        return (*vaa)[getRealIndex(i)];
     }
 
     template<typename T>

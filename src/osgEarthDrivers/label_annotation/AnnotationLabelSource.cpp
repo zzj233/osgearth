@@ -23,6 +23,7 @@
 #include <osgEarthAnnotation/PlaceNode>
 #include <osgEarth/DepthOffset>
 #include <osgEarth/VirtualProgram>
+#include <osgEarth/StateSetCache>
 #include <osgDB/FileNameUtils>
 #include <osgUtil/Optimizer>
 
@@ -56,6 +57,7 @@ public:
         Style styleCopy = style;
         TextSymbol* text = styleCopy.get<TextSymbol>();
         IconSymbol* icon = styleCopy.get<IconSymbol>();
+        AltitudeSymbol* alt = styleCopy.get<AltitudeSymbol>();
 
         osg::Group* group = new osg::Group();
         
@@ -67,6 +69,7 @@ public:
         StringExpression  iconUrlExpr     ( icon ? *icon->url()      : StringExpression() );
         NumericExpression iconScaleExpr   ( icon ? *icon->scale()    : NumericExpression() );
         NumericExpression iconHeadingExpr ( icon ? *icon->heading()  : NumericExpression() );
+        NumericExpression vertOffsetExpr  ( alt  ? *alt->verticalOffset() : NumericExpression() );
 
         for( FeatureList::const_iterator i = input.begin(); i != input.end(); ++i )
         {
@@ -125,14 +128,26 @@ public:
                     tempStyle.get<IconSymbol>()->heading()->setLiteral( feature->eval(iconHeadingExpr, &context) );
             }
             
-            osg::Node* node = makePlaceNode(
+            PlaceNode* node = makePlaceNode(
                 context,
                 feature,
-                tempStyle,
-                textPriorityExpr);
+                tempStyle);
 
             if ( node )
             {
+                if (!textPriorityExpr.empty())
+                {
+                    float val = feature->eval(textPriorityExpr, &context);
+                    node->setPriority( val >= 0.0f ? val : FLT_MAX );
+                }
+
+                if (alt && alt->technique() == alt->TECHNIQUE_SCENE && !vertOffsetExpr.empty())
+                {
+                    float val = feature->eval(vertOffsetExpr, &context);
+                    const osg::Vec3d& off = node->getLocalOffset();
+                    node->setLocalOffset(osg::Vec3d(off.x(), off.y(), val));
+                }
+
                 if ( context.featureIndex() )
                 {
                     context.featureIndex()->tagNode(node, feature);
@@ -146,32 +161,28 @@ public:
     }
 
 
-    osg::Node* makePlaceNode(FilterContext&     context,
+    PlaceNode* makePlaceNode(FilterContext&     context,
                              Feature*           feature, 
-                             const Style&       style, 
-                             NumericExpression& priorityExpr )
+                             const Style&       style )
     {
         osg::Vec3d center = feature->getGeometry()->getBounds().center();
 
         AltitudeMode mode = ALTMODE_ABSOLUTE;        
+        osg::Vec3d localOffset;
 
-        const AltitudeSymbol* alt = style.getSymbol<AltitudeSymbol>();
-        if (alt &&
-           (alt->clamping() == AltitudeSymbol::CLAMP_TO_TERRAIN || alt->clamping() == AltitudeSymbol::CLAMP_RELATIVE_TO_TERRAIN) &&
-           alt->technique() == AltitudeSymbol::TECHNIQUE_SCENE)
+        const AltitudeSymbol* alt = style.get<AltitudeSymbol>();
+        if ((alt == NULL) ||
+            (alt->technique().isSet() == false) ||
+            (alt->technique() == AltitudeSymbol::TECHNIQUE_SCENE))
         {
             mode = ALTMODE_RELATIVE;
         }                              
 
         GeoPoint point(feature->getSRS(), center.x(), center.y(), center.z(), mode);        
 
-        PlaceNode* node = new PlaceNode(0L, point, style, context.getDBOptions());
-        
-        if ( !priorityExpr.empty() )
-        {
-            float val = feature->eval(priorityExpr, &context);
-            node->setPriority( val >= 0.0f ? val : FLT_MAX );
-        }
+        PlaceNode* node = new PlaceNode();
+        node->setStyle(style, context.getDBOptions());
+        node->setPosition(point);
 
         return node;
     }

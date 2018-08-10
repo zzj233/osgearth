@@ -48,8 +48,10 @@ set(TARGET_GLSL
     LineDrawable.glsl
     PhongLighting.vert.glsl
     PhongLighting.frag.glsl
+    PointDrawable.glsl
     Text.vert.glsl
     Text.frag.glsl
+    Text_legacy.glsl
     )
 
 set(SHADERS_CPP "${CMAKE_CURRENT_BINARY_DIR}/AutoGenShaders.cpp")
@@ -157,6 +159,7 @@ SET(LIB_PUBLIC_HEADERS
     PhongLightingEffect
     Picker
     PluginLoader
+    PointDrawable
     PrimitiveIntersector
     Profile
     Profiler
@@ -193,6 +196,7 @@ SET(LIB_PUBLIC_HEADERS
     TerrainTileNode
     TileKeyDataStore
     Tessellator
+    Text
     TileKey
     TileHandler
     TileRasterizer
@@ -327,6 +331,7 @@ set(TARGET_SRC
     PagedNode.cpp
     PatchLayer.cpp
     PhongLightingEffect.cpp
+    PointDrawable.cpp
     PrimitiveIntersector.cpp
     Profile.cpp
     Profiler.cpp
@@ -357,6 +362,7 @@ set(TARGET_SRC
     TerrainTileModel.cpp
     TerrainTileModelFactory.cpp
     Tessellator.cpp
+    Text.cpp
     TextureBufferSerializer.cpp
     TileKey.cpp
     TileHandler.cpp

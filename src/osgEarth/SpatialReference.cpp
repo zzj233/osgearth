@@ -21,13 +21,8 @@
 #include <osgEarth/Registry>
 #include <osgEarth/Cube>
 #include <osgEarth/LocalTangentPlane>
-#include <osgEarth/ECEF>
-#include <osgEarth/ThreadingUtils>
-#include <osg/Notify>
-#include <ogr_api.h>
 #include <ogr_spatialref.h>
 #include <cpl_conv.h>
-#include <algorithm>
 
 #define LC "[SpatialReference] "
 
@@ -1123,6 +1118,8 @@ SpatialReference::transformXYPointArrays(double*  x,
 
         OE_WARN << LC << "INPUT: " << getWKT() << std::endl
             << "OUTPUT: " << out_srs->getWKT() << std::endl;
+
+        OE_WARN << LC << "ERROR:  " << CPLGetLastErrorMsg() << std::endl;
 
         return false;
     }

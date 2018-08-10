@@ -153,6 +153,7 @@ _tileCreationTime     ( 0.0 ),
 _batchUpdateInProgress( false ),
 _refreshRequired      ( false ),
 _stateUpdateRequired  ( false ),
+_renderModelUpdateRequired( false ),
 _rasterizer(0L)
 {
     // Necessary for pager object data
@@ -613,8 +614,27 @@ RexTerrainEngineNode::traverse(osg::NodeVisitor& nv)
         // Prepare the culler with the set of renderable layers:
         culler.setup(getMap(), _cachedLayerExtents, this->getEngineContext()->getRenderBindings());
 
+#ifdef PROFILE
+        static std::vector<double> times;
+        static double times_total = 0.0;
+        osg::Timer_t s1 = osg::Timer::instance()->tick();
+#endif
+
         // Assemble the terrain drawables:
         _terrain->accept(culler);
+
+#ifdef PROFILE
+        osg::Timer_t s2 = osg::Timer::instance()->tick();
+        double delta = osg::Timer::instance()->delta_m(s1, s2);
+        times_total += delta;
+        times.push_back(delta);
+        if (times.size() == 60)
+        {
+            Registry::instance()->startActivity("CULL(ms)", Stringify()<<(times_total/times.size()));
+            times.clear();
+            times_total = 0;
+        }
+#endif
 
         // If we're using geometry pooling, optimize the drawable for shared state
         // by sorting the draw commands
@@ -1148,7 +1168,7 @@ RexTerrainEngineNode::addLayer(Layer* layer)
                 addElevationLayer(dynamic_cast<ElevationLayer*>(layer));
         }
 
-        cacheLayerExtentInMapSRS(layer);
+        cacheLayerExtentInMapSRS(layer);        
     }
 }
 
@@ -1231,6 +1251,8 @@ RexTerrainEngineNode::addTileLayer(Layer* tileLayer)
             updateModels.setReloadData(true);
             _terrain->accept(updateModels);
         }
+
+        updateState();
     }
 }
 
@@ -1264,6 +1286,8 @@ RexTerrainEngineNode::removeImageLayer( ImageLayer* layerRemoved )
                 }
             }
         }
+
+        updateState();
     }
 
     if (_terrain)
