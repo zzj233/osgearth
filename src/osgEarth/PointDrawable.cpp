@@ -274,8 +274,6 @@ PointGroup::getPointDrawable(unsigned i)
 
 //...................................................................
 
-//...................................................................
-
 #undef  LC
 #define LC "[PointDrawable] "
 
@@ -294,6 +292,13 @@ namespace osgEarth { namespace Serializers { namespace PointDrawable
         ADD_UINT_SERIALIZER( Count, 0u );
     }
 } } }
+
+//...................................................................
+
+namespace
+{
+    static bool s_isCoreProfile;
+}
 
 PointDrawable::PointDrawable() :
 osg::Geometry(),
@@ -599,6 +604,7 @@ PointDrawable::dirty()
 }
 
 osg::ref_ptr<osg::StateSet> PointDrawable::_sharedStateSet;
+bool PointDrawable::_sharedStateSetCompiled = false;
 
 void
 PointDrawable::setupState()
@@ -626,38 +632,58 @@ PointDrawable::setupState()
             {
                 //todo
             }
+
+            s_isCoreProfile = Registry::capabilities().isCoreProfile();
         }
         s_mutex.unlock();
     }
 }
 
 void
+PointDrawable::compileGLObjects(osg::RenderInfo& ri) const
+{
+    checkSharedStateSet(ri.getState());
+    osg::Geometry::compileGLObjects(ri);
+}
+
+void
 PointDrawable::drawImplementation(osg::RenderInfo& ri) const
 {
-    // The mode validity for PointSprite might never get set since
-    // the OSG GLObjectVisitor cannot traverse the shared stateset;
-    // so this block of code will set it upon first draw.
-    static bool s_sharedStateActivated = false;
-    static Threading::Mutex s_mutex;
+    checkSharedStateSet(ri.getState());
 
-    if (!s_sharedStateActivated)
+    // in the compatibility profile, we have to expressly enable point sprites;
+    // not sure why this doesn't happen in osg::PointSprite
+    if (!s_isCoreProfile)
     {
-        s_mutex.lock();
-        if (!s_sharedStateActivated)
-        {                
+        glEnable(GL_POINT_SPRITE_ARB);
+        //ri.getState()->applyMode(GL_POINT_SPRITE_ARB, true); // doesn't work :(
+    }
+
+    osg::Geometry::drawImplementation(ri);
+}
+
+void
+PointDrawable::checkSharedStateSet(osg::State* state) const
+{
+    if (_sharedStateSet.valid() && !_sharedStateSetCompiled)
+    {
+        static Threading::Mutex s_mutex;
+        Threading::ScopedMutexLock lock(s_mutex);
+
+        if (!_sharedStateSetCompiled)
+        {
             osg::PointSprite* sprite = dynamic_cast<osg::PointSprite*>(
                 _sharedStateSet->getTextureAttribute(0, osg::StateAttribute::POINTSPRITE));
 
             if (sprite)
-                sprite->checkValidityOfAssociatedModes(*ri.getState());
+            {
+                sprite->checkValidityOfAssociatedModes(*state);
+            }
 
-            s_sharedStateActivated = true;
+            _sharedStateSet->compileGLObjects(*state);
+            _sharedStateSetCompiled = true;
         }
-
-        s_mutex.unlock();
     }
-
-    osg::Geometry::drawImplementation(ri);
 }
 
 void

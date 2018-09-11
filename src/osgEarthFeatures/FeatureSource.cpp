@@ -167,9 +167,9 @@ FeatureSource::getFilters() const
 }
 
 FeatureCursor*
-FeatureSource::createFeatureCursor()
+FeatureSource::createFeatureCursor(ProgressCallback* progress)
 {
-    return createFeatureCursor(Symbology::Query());
+    return createFeatureCursor(Symbology::Query(), progress);
 }
 
 const FeatureSchema&

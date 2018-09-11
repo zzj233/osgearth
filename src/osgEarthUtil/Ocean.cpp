@@ -59,6 +59,17 @@ OceanOptions::getConfig() const
     return conf;
 }
 
+#if 0
+//------------------------------------------------------------------------
+
+OceanLayer::OceanLayer(OceanLayerOptions* optionsPtr) :
+VisibleLayer(optionsPtr ? optionsPtr : &_optionsConcrete),
+_options(optionsPtr ? optionsPtr : &_optionsConcrete)
+{
+    //nop - init() called by subclass.
+}
+#endif
+
 //------------------------------------------------------------------------
 
 #undef  LC

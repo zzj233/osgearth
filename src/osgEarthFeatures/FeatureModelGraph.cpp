@@ -186,20 +186,10 @@ struct osgEarthFeatureModelPseudoLoader : public osgDB::ReaderWriter
            return ReadResult::ERROR_IN_READING_FILE;
         }
 
-        //osg::ref_ptr<FeatureModelGraph> graph = getGraph(uid);
-        // graph is valid at this point, otherwise the above lock would not succeed
-        //if ( graph.valid() )
-        {
-            // Take a reference on the map to avoid map destruction during thread operation
-            //osg::ref_ptr<const Map> map = graph->getSession()->getMap();
-            //if (map.valid() == true)
-            {
-                Registry::instance()->startActivity(uri);
-                osg::Node* node = graph->load(lod, x, y, uri, readOptions);
-                Registry::instance()->endActivity(uri);
-                return ReadResult(node);
-            }
-        }
+        Registry::instance()->startActivity(uri);
+        osg::Node* node = graph->load(lod, x, y, uri, readOptions);
+        Registry::instance()->endActivity(uri);
+        return ReadResult(node);
     }
 };
 
@@ -889,12 +879,12 @@ namespace
     {
         if (key)
         {
-            return key->str();
+            return Cache::makeCacheKey(key->str(), "fmg");
         }
         else
         {
-            return Stringify() << osgEarth::hashString(
-                Stringify() << extent.toString() << level.styleName().get());
+            std::string b = Stringify() << extent.toString() << level.styleName().get();
+            return Cache::makeCacheKey(b, "fmg");
         }
     }
 }
@@ -1006,6 +996,8 @@ FeatureModelGraph::buildTile(const FeatureLevel& level,
     // Not there? Build it
     if (!group.valid())
     {
+        osg::ref_ptr<ProgressCallback> progress = new ProgressCallback();
+
         // set up for feature indexing if appropriate:
         FeatureSourceIndexNode* index = 0L;
 
@@ -1044,7 +1036,7 @@ FeatureModelGraph::buildTile(const FeatureLevel& level,
             if ( style )
             {
                 // found a specific style to use.
-                node = createStyleGroup( *style, query, index, readOptions );
+                node = createStyleGroup( *style, query, index, readOptions, progress.get());
                 if ( node )
                     group->addChild( node );
             }
@@ -1053,7 +1045,7 @@ FeatureModelGraph::buildTile(const FeatureLevel& level,
                 const StyleSelector* selector = _session->styles()->getSelector( *level.styleName() );
                 if ( selector )
                 {
-                    buildStyleGroups( selector, query, index, group.get(), readOptions );
+                    buildStyleGroups( selector, query, index, group.get(), readOptions, progress.get());
                 }
             }
         }
@@ -1069,13 +1061,18 @@ FeatureModelGraph::buildTile(const FeatureLevel& level,
                     *_session->getFeatureSource()->getFeatureSourceOptions().name() );
             }
 
-            osg::Node* node = build(defaultStyle, query, extent, index, readOptions);
+            osg::Node* node = build(defaultStyle, query, extent, index, readOptions, progress.get());
             if ( node )
                 group->addChild( node );
         }
 
-        // cache it if appropriate.
-        if (_options.nodeCaching() == true)
+        if (progress->isCanceled())
+        {
+            group->removeChildren(0, group->getNumChildren());
+        }
+        
+        // cache it if appropriate (and not if it was canceled)
+        else if (_options.nodeCaching() == true)
         {
             writeTileToCache(cacheKey, group.get(), readOptions);
         }
@@ -1134,7 +1131,8 @@ FeatureModelGraph::build(const Style&          defaultStyle,
                          const Query&          baseQuery, 
                          const GeoExtent&      workingExtent,
                          FeatureIndexBuilder*  index,
-                         const osgDB::Options* readOptions)
+                         const osgDB::Options* readOptions,
+                         ProgressCallback*     progress)
 {
     OE_TEST << LC << "build " << workingExtent.toString() << std::endl;
 
@@ -1148,7 +1146,7 @@ FeatureModelGraph::build(const Style&          defaultStyle,
         const FeatureProfile* featureProfile = source->getFeatureProfile();
 
         // each feature has its own style, so use that and ignore the style catalog.
-        osg::ref_ptr<FeatureCursor> cursor = source->createFeatureCursor( baseQuery );
+        osg::ref_ptr<FeatureCursor> cursor = source->createFeatureCursor( baseQuery, progress );
 
         while( cursor.valid() && cursor->hasMore() )
         {
@@ -1211,7 +1209,7 @@ FeatureModelGraph::build(const Style&          defaultStyle,
                     Query combinedQuery = baseQuery.combineWith( *sel.query() );
 
                     // query, sort, and add each style group to th parent:
-                    queryAndSortIntoStyleGroups( combinedQuery, *sel.styleExpression(), index, group.get(), readOptions );
+                    queryAndSortIntoStyleGroups( combinedQuery, *sel.styleExpression(), index, group.get(), readOptions, progress);
                 }
 
                 // otherwise, all feature returned by this query will have the same style:
@@ -1225,7 +1223,7 @@ FeatureModelGraph::build(const Style&          defaultStyle,
                     Query combinedQuery = baseQuery.combineWith( *sel.query() );
 
                     // then create the node.
-                    osg::Group* styleGroup = createStyleGroup( combinedStyle, combinedQuery, index, readOptions );
+                    osg::Group* styleGroup = createStyleGroup( combinedStyle, combinedQuery, index, readOptions, progress);
 
                     if ( styleGroup && !group->containsNode(styleGroup) )
                         group->addChild( styleGroup );
@@ -1252,7 +1250,7 @@ FeatureModelGraph::build(const Style&          defaultStyle,
             if ( defaultStyle.empty() )
                 combinedStyle = *styles->getDefaultStyle();
 
-            osg::Group* styleGroup = createStyleGroup( combinedStyle, baseQuery, index, readOptions );
+            osg::Group* styleGroup = createStyleGroup( combinedStyle, baseQuery, index, readOptions, progress);
 
             if ( styleGroup && !group->containsNode(styleGroup) )
                 group->addChild( styleGroup );
@@ -1281,7 +1279,8 @@ FeatureModelGraph::buildStyleGroups(const StyleSelector*  selector,
                                     const Query&          baseQuery,
                                     FeatureIndexBuilder*  index,
                                     osg::Group*           parent,
-                                    const osgDB::Options* readOptions)
+                                    const osgDB::Options* readOptions,
+                                    ProgressCallback*     progress)
 {
     OE_TEST << LC << "buildStyleGroups " << selector->name() << std::endl;
 
@@ -1293,7 +1292,7 @@ FeatureModelGraph::buildStyleGroups(const StyleSelector*  selector,
         Query combinedQuery = baseQuery.combineWith( *selector->query() );
 
         // query, sort, and add each style group to the parent:
-        queryAndSortIntoStyleGroups( combinedQuery, *selector->styleExpression(), index, parent, readOptions );
+        queryAndSortIntoStyleGroups( combinedQuery, *selector->styleExpression(), index, parent, readOptions, progress);
     }
 
     // otherwise, all feature returned by this query will have the same style:
@@ -1309,7 +1308,7 @@ FeatureModelGraph::buildStyleGroups(const StyleSelector*  selector,
         Query combinedQuery = baseQuery.combineWith( *selector->query() );
 
         // then create the node.
-        osg::Node* node = createStyleGroup(style, combinedQuery, index, readOptions);
+        osg::Node* node = createStyleGroup(style, combinedQuery, index, readOptions, progress);
         if ( node && !parent->containsNode(node) )
             parent->addChild( node );
     }
@@ -1328,7 +1327,8 @@ FeatureModelGraph::queryAndSortIntoStyleGroups(const Query&            query,
                                                const StringExpression& styleExpr,
                                                FeatureIndexBuilder*    index,
                                                osg::Group*             parent,
-                                               const osgDB::Options*   readOptions)
+                                               const osgDB::Options*   readOptions,
+                                               ProgressCallback*       progress)
 {
     OE_TEST << LC << "queryAndSortIntoStyleGroups " << std::endl;
 
@@ -1339,7 +1339,7 @@ FeatureModelGraph::queryAndSortIntoStyleGroups(const Query&            query,
     const GeoExtent& extent = featureProfile->getExtent();
     
     // query the feature source:
-    osg::ref_ptr<FeatureCursor> cursor = _session->getFeatureSource()->createFeatureCursor( query );
+    osg::ref_ptr<FeatureCursor> cursor = _session->getFeatureSource()->createFeatureCursor( query, progress );
     if ( !cursor.valid() )
         return;
 
@@ -1469,7 +1469,8 @@ osg::Group*
 FeatureModelGraph::createStyleGroup(const Style&          style, 
                                     const Query&          query, 
                                     FeatureIndexBuilder*  index,
-                                    const osgDB::Options* readOptions)
+                                    const osgDB::Options* readOptions,
+                                    ProgressCallback*     progress)
 {
     OE_TEST << LC << "createStyleGroup " << style.getName() << std::endl;
 
@@ -1482,7 +1483,7 @@ FeatureModelGraph::createStyleGroup(const Style&          style,
     const GeoExtent& extent = featureProfile->getExtent();
     
     // query the feature source:
-    osg::ref_ptr<FeatureCursor> cursor = _session->getFeatureSource()->createFeatureCursor( query );
+    osg::ref_ptr<FeatureCursor> cursor = _session->getFeatureSource()->createFeatureCursor( query, progress );
 
     if ( cursor.valid() && cursor->hasMore() )
     {

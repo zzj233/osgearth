@@ -24,6 +24,7 @@
 #include <osgEarth/VisibleLayer>
 #include <osgEarth/LayerListener>
 #include <osgEarth/ImageLayer>
+#include <osgEarthUtil/Ocean>
 #include <osgEarthTriton/TritonCallback>
 
 namespace osgEarth { namespace Triton
@@ -162,6 +163,7 @@ namespace osgEarth { namespace Triton
         osg::ref_ptr<osg::Group> _root;
         osg::ref_ptr<osg::Node> _tritonNode;
         osg::ref_ptr<Callback> _callback;
+        float _seaLevel;
 
     private:
 
