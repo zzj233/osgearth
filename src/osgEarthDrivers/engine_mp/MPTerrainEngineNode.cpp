@@ -343,7 +343,7 @@ MPTerrainEngineNode::setMap(const Map* map, const TerrainOptions& options)
     // live tiles of the current map revision so they can inrementally update
     // themselves if necessary.
     _liveTiles = new TileNodeRegistry("live", this->getTerrain());
-    _liveTiles->setRevisioningEnabled( _terrainOptions.incrementalUpdate() == true );
+    _liveTiles->setRevisioningEnabled(false);
     _liveTiles->setMapRevision( _update_mapf->getRevision() );
 
     // Facility to properly release GL objects
@@ -409,20 +409,18 @@ MPTerrainEngineNode::setMap(const Map* map, const TerrainOptions& options)
     dirtyBound();
 
     OE_INFO << LC << "Edge normalization is " << (_terrainOptions.normalizeEdges() == true? "ON" : "OFF") << std::endl;
+
+    if (_terrainOptions.enableMercatorFastPath().isSetTo(true))        
+    {
+        OE_NOTICE << LC << "Mercator fast path is enabled - warning: it is incompatible with caching" << std::endl;
+    }
 }
 
 
 osg::BoundingSphere
 MPTerrainEngineNode::computeBound() const
 {
-    //if ( _terrain && _terrain->getNumChildren() > 0 )
-    //{
-    //    return _terrain->getBound();
-    //}
-    //else
-    {
-        return TerrainEngineNode::computeBound();
-    }
+    return TerrainEngineNode::computeBound();
 }
 
 void
@@ -430,16 +428,7 @@ MPTerrainEngineNode::invalidateRegion(const GeoExtent& extent,
                                       unsigned         minLevel,
                                       unsigned         maxLevel)
 {
-    if (_terrainOptions.incrementalUpdate() == true && _liveTiles.valid())
-    {
-        GeoExtent extentLocal = extent;
-        if ( !extent.getSRS()->isEquivalentTo(this->getMap()->getSRS()) )
-        {
-            extent.transform(this->getMap()->getSRS(), extentLocal);
-        }
-
-        _liveTiles->setDirty(extentLocal, minLevel, maxLevel);
-    }
+    //NOP
 }
 
 void
@@ -453,17 +442,7 @@ MPTerrainEngineNode::refresh(bool forceDirty)
     }
     else
     {
-        if ( _terrainOptions.incrementalUpdate() == true )
-        {
-            // run an atomic "dirty" operation:
-            //_update_mapf->sync();
-            //_liveTiles->setMapRevision( _update_mapf->getRevision(), forceDirty );
-        }
-        else
-        {
-            dirtyTerrain();
-        }
-
+        dirtyTerrain();
         _refreshRequired = false;
     }
 }

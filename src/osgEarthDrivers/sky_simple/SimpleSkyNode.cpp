@@ -270,6 +270,12 @@ SimpleSkyNode::construct()
         makeMoon();
 
         makeStars();
+
+        // Decorations are shown by default, so hide them as needed
+        if (_options.sunVisible() == false) setSunVisible(false);
+        if (_options.moonVisible() == false) setMoonVisible(false);
+        if (_options.starsVisible() == false) setStarsVisible(false);
+        if (_options.atmosphereVisible() == false) setAtmosphereVisible(false);
     }
 
     // Update everything based on the date/time.
@@ -315,7 +321,23 @@ SimpleSkyNode::traverse( osg::NodeVisitor& nv )
     } 
 
     SkyNode::traverse( nv ); 
-} 
+}
+
+void
+SimpleSkyNode::releaseGLObjects(osg::State* state) const
+{
+    SkyNode::releaseGLObjects(state);
+    if (_cullContainer.valid())
+        _cullContainer->releaseGLObjects(state);
+}
+
+void
+SimpleSkyNode::resizeGLObjectBuffers(unsigned maxSize)
+{
+    SkyNode::resizeGLObjectBuffers(maxSize);
+    if (_cullContainer.valid())
+        _cullContainer->resizeGLObjectBuffers(maxSize);
+}
 
 void
 SimpleSkyNode::onSetEphemeris()
@@ -775,6 +797,7 @@ SimpleSkyNode::buildStarGeometry(const std::vector<StarData>& stars)
     const osgEarth::Capabilities& caps = osgEarth::Registry::capabilities();
 
     VirtualProgram* vp = VirtualProgram::getOrCreate(drawable->getOrCreateStateSet());
+    vp->setName("SimpleSky Stars");
     Shaders shaders;
     shaders.load(vp, shaders.Stars_Vert);
     shaders.load(vp, shaders.Stars_Frag);

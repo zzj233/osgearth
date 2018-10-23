@@ -113,33 +113,33 @@ GeoPoint::GeoPoint(const Config& conf, const SpatialReference* srs) :
 _srs    ( srs ),
 _altMode( ALTMODE_ABSOLUTE )
 {
-    conf.getIfSet( "x", _p.x() );
-    conf.getIfSet( "y", _p.y() );
-    conf.getIfSet( "z", _p.z() );
-    conf.getIfSet( "alt", _p.z() );
-    conf.getIfSet( "hat", _p.z() ); // height above terrain (relative)
+    conf.get( "x", _p.x() );
+    conf.get( "y", _p.y() );
+    conf.get( "z", _p.z() );
+    conf.get( "alt", _p.z() );
+    conf.get( "hat", _p.z() ); // height above terrain (relative)
 
     if ( !_srs.valid() )
         _srs = SpatialReference::create( conf.value("srs"), conf.value("vdatum") );
 
     if ( conf.hasValue("lat") && (!_srs.valid() || _srs->isGeographic()) )
     {
-        conf.getIfSet( "lat", _p.y() );
+        conf.get( "lat", _p.y() );
         if ( !_srs.valid() ) 
             _srs = SpatialReference::create("wgs84");
     }
     if ( conf.hasValue("long") && (!_srs.valid() || _srs->isGeographic()) )
     {
-        conf.getIfSet("long", _p.x());
+        conf.get("long", _p.x());
         if ( !_srs.valid() ) 
             _srs = SpatialReference::create("wgs84");
     }
 
     if ( conf.hasValue("mode") )
     {
-        conf.getIfSet( "mode", "relative",            _altMode, ALTMODE_RELATIVE );
-        conf.getIfSet( "mode", "relative_to_terrain", _altMode, ALTMODE_RELATIVE );
-        conf.getIfSet( "mode", "absolute",            _altMode, ALTMODE_ABSOLUTE );
+        conf.get( "mode", "relative",            _altMode, ALTMODE_RELATIVE );
+        conf.get( "mode", "relative_to_terrain", _altMode, ALTMODE_RELATIVE );
+        conf.get( "mode", "absolute",            _altMode, ALTMODE_ABSOLUTE );
     }
     else
     {
@@ -1183,18 +1183,10 @@ GeoExtent::expandToInclude(double x, double y)
     }
 }
 
-void
-GeoExtent::expandToInclude(const Bounds& rhs)
-{
-    expandToInclude( rhs.center() );
-    expandToInclude( rhs.xMin(), rhs.yMin() );
-    expandToInclude( rhs.xMax(), rhs.yMax() );
-}
-
 bool
 GeoExtent::expandToInclude(const GeoExtent& rhs)
 {
-    if ( isInvalid() || rhs.isInvalid() )
+    if (rhs.isInvalid() || !_srs.valid())
         return false;
 
     if ( !rhs.getSRS()->isHorizEquivalentTo( _srs.get() ) )
@@ -1203,12 +1195,54 @@ GeoExtent::expandToInclude(const GeoExtent& rhs)
     }
 
     else
-    {
-        // include the centroid first in order to get the optimal
-        // expansion direction.
-        expandToInclude( rhs.getCentroid() );
-        expandToInclude( rhs.west(), rhs.south() );
-        expandToInclude( rhs.east(), rhs.north() );
+    {        
+        if (area() <= 0.0)
+        {
+            *this = rhs;
+            return true;
+        }
+
+        double h = std::max(north(), rhs.north()) - std::min(south(), rhs.south());
+        if (rhs.south() < south())
+        {
+            _south = rhs.south();
+        }
+        _height = h;
+        
+        // non-wrap-around new width:
+        double w0 = std::max(xMax(), rhs.xMax()) - std::min(xMin(), rhs.xMin());
+
+        if (isGeographic())
+        {
+            // wrap-around width:
+            double w1 = west() > rhs.east()? (180-west())+(rhs.east()-(-180)) : (180-rhs.west()) + (east()-(-180));
+
+            // pick the smaller one:
+            if (w0 < w1)
+            {
+                if (w0 > _width)
+                {
+                    _width = w0;
+                    _west = std::min(west(), rhs.west());
+                }
+            }
+            else
+            {
+                if (w1 > _width)
+                {
+                    _width = w1;
+                    if (west() <= rhs.east())
+                        _west = rhs.west();
+                }
+            }
+        }
+        else
+        {
+            // projected mode is the same approach as Y
+            _west = std::min(west(), rhs.west());
+            _width = w0;
+        }
+
     }
 
     return true;
@@ -1886,36 +1920,6 @@ namespace
             {
                 OE_WARN << LC << "RasterIO failed.\n";
             }
-
-
-#if 0
-
-        //Write the image data into the memory dataset
-        //If the image is already RGBA, just read all 4 bands in one call
-        if (image->getPixelFormat() == GL_RGBA)
-        {
-            srcDS->RasterIO(GF_Write, 0, 0, clonedImage->s(), clonedImage->t(), (void*)clonedImage->data(), clonedImage->s(), clonedImage->t(), GDT_Byte, 4, NULL, 4, 4 * image->s(), 1);
-        }
-        else if (image->getPixelFormat() == GL_RGB)
-        {    
-            //OE_NOTICE << "[osgEarth::GeoData] Reprojecting RGB " << std::endl;
-            //Read the read, green and blue bands
-            srcDS->RasterIO(GF_Write, 0, 0, clonedImage->s(), clonedImage->t(), (void*)clonedImage->data(), clonedImage->s(), clonedImage->t(), GDT_Byte, 3, NULL, 3, 3 * image->s(), 1);
-
-            //Initialize the alpha values to 255.
-            unsigned char *alpha = new unsigned char[clonedImage->s() * clonedImage->t()];
-            memset(alpha, 255, clonedImage->s() * clonedImage->t());
-
-            GDALRasterBand* alphaBand = srcDS->GetRasterBand(4);
-            alphaBand->RasterIO(GF_Write, 0, 0, clonedImage->s(), clonedImage->t(), alpha, clonedImage->s(),clonedImage->t(), GDT_Byte, 0, 0);
-
-            delete[] alpha;
-        }
-        else
-        {
-            OE_WARN << LC << "createDataSetFromImage: unsupported pixel format " << std::hex << image->getPixelFormat() << std::endl;
-        }
-#endif
 
             srcDS->FlushCache();
         }
@@ -2658,24 +2662,6 @@ const osg::HeightField*
 GeoHeightField::getHeightField() const
 {
     return _heightField.get();
-}
-
-osg::HeightField*
-GeoHeightField::getHeightField() 
-{
-    return _heightField.get();
-}
-
-osg::HeightField*
-GeoHeightField::takeHeightField()
-{
-    return _heightField.release();
-}
-
-NormalMap*
-GeoHeightField::getNormalMap()
-{
-    return _normalMap.get();
 }
 
 const NormalMap*

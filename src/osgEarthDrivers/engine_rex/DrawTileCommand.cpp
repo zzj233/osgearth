@@ -29,8 +29,6 @@ DrawTileCommand::draw(osg::RenderInfo& ri, DrawState& dsMaster, osg::Referenced*
     PerContextDrawState& ds = dsMaster.getPCDS(ri.getContextID());
 
     osg::State& state = *ri.getState();
-
-    //OE_INFO << LC << "      TILE: " << _geom << std::endl;
         
     // Tile key encoding, if the uniform is required.
     if (ds._tileKeyUL >= 0 )
@@ -38,10 +36,11 @@ DrawTileCommand::draw(osg::RenderInfo& ri, DrawState& dsMaster, osg::Referenced*
         ds._ext->glUniform4fv(ds._tileKeyUL, 1, _keyValue.ptr());
     }
 
-    if (ds._layerOrderUL >= 0 && !ds._layerOrder.isSetTo(_order))
+    // Apply the layer draw order for this tile so we can blend correctly:
+    if (ds._layerOrderUL >= 0 && !ds._layerOrder.isSetTo(_layerOrder))
     {
-        ds._ext->glUniform1i(ds._layerOrderUL, (GLint)_order);
-        ds._layerOrder = _order;
+        ds._ext->glUniform1i(ds._layerOrderUL, (GLint)_layerOrder);
+        ds._layerOrder = _layerOrder;
     }
 
     // Elevation coefficients (can probably be terrain-wide)
@@ -79,8 +78,7 @@ DrawTileCommand::draw(osg::RenderInfo& ri, DrawState& dsMaster, osg::Referenced*
 
             if (sampler._texture.valid() && !samplerState._texture.isSetTo(sampler._texture.get()))
             {
-                state.setActiveTextureUnit((*dsMaster._bindings)[s].unit());
-                sampler._texture->apply(state);
+                state.applyTextureAttribute((*dsMaster._bindings)[s].unit(), sampler._texture.get());
                 samplerState._texture = sampler._texture.get();
             }
 
@@ -111,8 +109,7 @@ DrawTileCommand::draw(osg::RenderInfo& ri, DrawState& dsMaster, osg::Referenced*
 
             if (sampler._texture.valid() && !samplerState._texture.isSetTo(sampler._texture.get()))
             {
-                state.setActiveTextureUnit((*dsMaster._bindings)[s].unit());
-                sampler._texture->apply(state);
+                state.applyTextureAttribute((*dsMaster._bindings)[s].unit(), sampler._texture.get());
                 samplerState._texture = sampler._texture.get();
             }
 

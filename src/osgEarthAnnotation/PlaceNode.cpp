@@ -25,14 +25,12 @@
 #include <osgEarthAnnotation/AnnotationRegistry>
 #include <osgEarthAnnotation/BboxDrawable>
 #include <osgEarth/Utils>
-#include <osgEarth/Registry>
-#include <osgEarth/ShaderGenerator>
 #include <osgEarth/GeoMath>
 #include <osgEarth/ScreenSpaceLayout>
-#include <osgEarth/NodeUtils>
 #include <osgEarth/Lighting>
 #include <osgEarth/Shaders>
-#include <osgEarth/LineDrawable>
+#include <osgEarth/VirtualProgram>
+#include <osgEarth/ShaderGenerator>
 
 #include <osg/Depth>
 #include <osgText/Text>
@@ -48,7 +46,8 @@ namespace
     const char* iconVS =
         "#version " GLSL_VERSION_STR "\n"
         "out vec2 oe_PlaceNode_texcoord; \n"
-        "void oe_PlaceNode_icon_VS(inout vec4 vertex) { \n"
+        "void oe_PlaceNode_icon_VS(inout vec4 vertex) \n"
+        "{ \n"
         "    oe_PlaceNode_texcoord = gl_MultiTexCoord0.st; \n"
         "} \n";
 
@@ -56,13 +55,14 @@ namespace
         "#version " GLSL_VERSION_STR "\n"
         "in vec2 oe_PlaceNode_texcoord; \n"
         "uniform sampler2D oe_PlaceNode_tex; \n"
-        "void oe_PlaceNode_icon_FS(inout vec4 color) { \n"
+        "void oe_PlaceNode_icon_FS(inout vec4 color) \n"
+        "{ \n"
         "    color = texture(oe_PlaceNode_tex, oe_PlaceNode_texcoord); \n"
         "} \n";
 }
 
-osg::ref_ptr<osg::StateSet> PlaceNode::_geodeStateSet;
-osg::ref_ptr<osg::StateSet> PlaceNode::_imageStateSet;
+osg::observer_ptr<osg::StateSet> PlaceNode::s_geodeStateSet;
+osg::observer_ptr<osg::StateSet> PlaceNode::s_imageStateSet;
 
 PlaceNode::PlaceNode() :
 GeoPositionNode()
@@ -110,33 +110,44 @@ PlaceNode::construct()
     _bboxDrawable = 0L;
     _textDrawable = 0L;
 
-    if (!_geodeStateSet.valid())
+    // This class makes its own shaders
+    ShaderGenerator::setIgnoreHint(this, true);
+
+    // Construct the shared state sets
+    if (s_geodeStateSet.lock(_geodeStateSet) == false)
     {
         static Threading::Mutex s_mutex;
-        s_mutex.lock();
-        if (!_geodeStateSet.valid())
+        Threading::ScopedMutexLock lock(s_mutex);
+
+        if (s_geodeStateSet.lock(_geodeStateSet) == false)
         {
-            _geodeStateSet = new osg::StateSet();
+            s_geodeStateSet = _geodeStateSet = new osg::StateSet();
 
             // draw in the screen-space bin
             ScreenSpaceLayout::activate(_geodeStateSet.get());
 
             // completely disable depth buffer
-            _geodeStateSet->setAttributeAndModes( new osg::Depth(osg::Depth::ALWAYS, 0, 1, false), 1 ); 
+            _geodeStateSet->setAttributeAndModes(new osg::Depth(osg::Depth::ALWAYS, 0, 1, false), 1);
 
             // Disable lighting for place nodes by default
             _geodeStateSet->setDefine(OE_LIGHTING_DEFINE, osg::StateAttribute::OFF | osg::StateAttribute::PROTECTED);
-            
-            // shared stateset for the icon
-            {
-                _imageStateSet = new osg::StateSet();
-                VirtualProgram* vp = VirtualProgram::getOrCreate(_imageStateSet.get());
-                vp->setFunction("oe_PlaceNode_icon_VS", iconVS, ShaderComp::LOCATION_VERTEX_MODEL);
-                vp->setFunction("oe_PlaceNode_icon_FS", iconFS, ShaderComp::LOCATION_FRAGMENT_COLORING);
-                _imageStateSet->addUniform(new osg::Uniform("oe_PlaceNode_tex", 0));
-            }
         }
-        s_mutex.unlock();
+    }
+
+    if (s_imageStateSet.lock(_imageStateSet) == false)
+    {
+        static Threading::Mutex s_mutex;
+        Threading::ScopedMutexLock lock(s_mutex);
+
+        if (s_imageStateSet.lock(_imageStateSet) == false)
+        {
+            s_imageStateSet = _imageStateSet = new osg::StateSet();
+            VirtualProgram* vp = VirtualProgram::getOrCreate(_imageStateSet.get());
+            vp->setName("PlaceNode::imageStateSet");
+            vp->setFunction("oe_PlaceNode_icon_VS", iconVS, ShaderComp::LOCATION_VERTEX_MODEL);
+            vp->setFunction("oe_PlaceNode_icon_FS", iconFS, ShaderComp::LOCATION_FRAGMENT_COLORING);
+            _imageStateSet->addUniform(new osg::Uniform("oe_PlaceNode_tex", 0));
+        }
     }
 }
 
@@ -286,7 +297,7 @@ PlaceNode::compile()
             // todo: optimize this better:
             _imageDrawable->getOrCreateStateSet()->merge(*_imageStateSet.get());
             _geode->addChild(_imageDrawable);
-            imageBox = osgEarth::Utils::getBoundingBox(_imageDrawable);
+            imageBox = _imageDrawable->getBoundingBox();
         }    
     }
 
@@ -305,7 +316,7 @@ PlaceNode::compile()
     const BBoxSymbol* bboxsymbol = _style.get<BBoxSymbol>();
     if ( bboxsymbol && _textDrawable )
     {
-        _bboxDrawable = new BboxDrawable( osgEarth::Utils::getBoundingBox(_textDrawable), *bboxsymbol );
+        _bboxDrawable = new BboxDrawable( _textDrawable->getBoundingBox(), *bboxsymbol );
         _geode->addChild(_bboxDrawable);
     }
 
@@ -314,7 +325,7 @@ PlaceNode::compile()
         _geode->addChild( _textDrawable );
     }
 
-#if 0
+#if 0 // test a drop line
     LineDrawable* line = new LineDrawable(GL_LINES);
     line->pushVertex(osg::Vec3(0,0,0));
     line->pushVertex(osg::Vec3(0,0,-100000));
@@ -498,11 +509,11 @@ _readOptions( readOptions )
 {
     construct();
 
-    conf.getObjIfSet( "style",  _style );
-    conf.getIfSet   ( "text",   _text );
+    conf.get( "style",  _style );
+    conf.get( "text",   _text );
 
     optional<URI> imageURI;
-    conf.getIfSet( "icon", imageURI );
+    conf.get( "icon", imageURI );
     if ( imageURI.isSet() )
     {
         _image = imageURI->getImage();
@@ -518,11 +529,11 @@ PlaceNode::setConfig(const Config& conf)
 {
     GeoPositionNode::setConfig(conf);
 
-    conf.getObjIfSet( "style",  _style );
-    conf.getIfSet   ( "text",   _text );
+    conf.get( "style",  _style );
+    conf.get   ( "text",   _text );
 
     optional<URI> imageURI;
-    conf.getIfSet( "icon", imageURI );
+    conf.get( "icon", imageURI );
     if ( imageURI.isSet() )
     {
         _image = imageURI->getImage();
@@ -537,13 +548,13 @@ Config
 PlaceNode::getConfig() const
 {
     Config conf( "place" );
-    conf.add   ( "text",   _text );
-    conf.addObj( "style",  _style );
+    conf.set( "text",   _text );
+    conf.set( "style",  _style );
     if ( _image.valid() ) {
         if ( !_image->getFileName().empty() )
-            conf.add( "icon", _image->getFileName() );
+            conf.set( "icon", _image->getFileName() );
         else if ( !_image->getName().empty() )
-            conf.add( "icon", _image->getName() );
+            conf.set( "icon", _image->getName() );
     }
 
     return conf;

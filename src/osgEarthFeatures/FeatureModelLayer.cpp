@@ -41,7 +41,7 @@ GeometryCompilerOptions(options)
         
 void FeatureModelLayerOptions::fromConfig(const Config& conf)
 {
-    conf.getIfSet("feature_source", _featureSourceLayer);
+    conf.get("feature_source", _featureSourceLayer);
 }
 
 Config
@@ -50,7 +50,6 @@ FeatureModelLayerOptions::getConfig() const
     Config conf = VisibleLayerOptions::getConfig();
     conf.merge(FeatureModelOptions::getConfig());
     conf.merge(GeometryCompilerOptions::getConfig());
-    conf.key() = "feature_model";
 
     conf.set("feature_source", _featureSourceLayer);
     return conf;
@@ -100,6 +99,8 @@ FeatureModelLayer::init()
     // Depth sorting by default
     getOrCreateStateSet()->setRenderingHint(osg::StateSet::TRANSPARENT_BIN);
 
+    // activate opacity support
+    installDefaultOpacityShader();
 }
 
 void FeatureModelLayer::setFeatureModelLayerOptions(const FeatureModelLayerOptions& options)

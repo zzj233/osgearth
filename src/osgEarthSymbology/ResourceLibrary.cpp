@@ -55,7 +55,7 @@ ResourceLibrary::mergeConfig( const Config& conf )
     if (_name.empty())
         _name = conf.value( "name" );
 
-    conf.getIfSet( "url", _uri );
+    conf.get( "url", _uri );
 
     for( ConfigSet::const_iterator i = conf.children().begin(); i != conf.children().end(); ++i )
     {
@@ -63,11 +63,6 @@ ResourceLibrary::mergeConfig( const Config& conf )
         if ( child.key() == "skin" )
         {
             addResource( new SkinResource(child) );
-        }
-        else if ( child.key() == "marker" )
-        {
-            // to be decrepated
-            addResource( new MarkerResource(child) );
         }
         else if ( child.key() == "model" )
         {
@@ -94,19 +89,13 @@ ResourceLibrary::getConfig() const
 
         if ( _uri.isSet() )
         {
-            conf.addIfSet( "url", _uri );
+            conf.set( "url", _uri );
         }
         else
         {
             for( ResourceMap<SkinResource>::const_iterator i = _skins.begin(); i != _skins.end(); ++i )
             {
                 SkinResource* res = i->second.get();
-                conf.add( res->getConfig() );
-            }
-
-            for( ResourceMap<MarkerResource>::const_iterator i = _markers.begin(); i != _markers.end(); ++i )
-            {
-                MarkerResource* res = i->second.get();
                 conf.add( res->getConfig() );
             }
 
@@ -128,11 +117,6 @@ ResourceLibrary::addResource( Resource* resource )
         Threading::ScopedWriteLock exclusive(_mutex);
         _skins[resource->name()] = static_cast<SkinResource*>(resource);
     }
-    else if ( dynamic_cast<MarkerResource*>(resource) )
-    {
-        Threading::ScopedWriteLock exclusive(_mutex);
-        _markers[resource->name()] = static_cast<MarkerResource*>(resource);
-    }
     else if ( dynamic_cast<InstanceResource*>(resource) )
     {
         Threading::ScopedWriteLock exclusive(_mutex);
@@ -151,11 +135,6 @@ ResourceLibrary::removeResource( Resource* resource )
     {
         Threading::ScopedWriteLock exclusive(_mutex);
         _skins.erase( resource->name() );
-    }
-    else if ( dynamic_cast<MarkerResource*>( resource ) )
-    {
-        Threading::ScopedWriteLock exclusive(_mutex);
-        _markers.erase( resource->name() );
     }
     else if ( dynamic_cast<InstanceResource*>( resource ) )
     {

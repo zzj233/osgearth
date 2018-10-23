@@ -266,19 +266,9 @@ namespace osgEarth
 
     public: // config methods
 
-        Config getConfig() const
-        {
-            Config conf("uri", base());
-            conf.addIfSet("option_string", _optionString);
-            conf.setReferrer( context().referrer() );
-            conf.setIsLocation( true );
-            return conf;
-        }
+        Config getConfig() const;
 
-        void mergeConfig(const Config& conf)
-        {
-            conf.getIfSet("option_string", _optionString);
-        }
+        void mergeConfig(const Config& conf);
 
     public: // Static convenience methods
 
@@ -427,38 +417,33 @@ namespace osgEarth
 
     // Config specialization for URI:
 
-    template <> inline
-    void Config::addIfSet<URI>( const std::string& key, const optional<URI>& opt ) {
-        if ( opt.isSet() ) {
-            Config c = opt->getConfig();
-            c.key() = key;
-            add( c );
-        }
-    }
-
     template<> inline
-    void Config::updateIfSet<URI>( const std::string& key, const optional<URI>& opt ) {
+    void Config::set<URI>( const std::string& key, const optional<URI>& opt ) {
         if ( opt.isSet() ) {
             remove(key);
-            add( key, opt->getConfig() );
+            set( key, opt->getConfig() );
         }
     }
 
     template<> inline
-    bool Config::getIfSet<URI>( const std::string& key, optional<URI>& output ) const {
-        if ( hasValue(key) ) {
-            output = URI( value(key), referrer(key) );
-            output->mergeConfig(*this);
-            return true;
+    bool Config::get<URI>( const std::string& key, optional<URI>& output ) const {
+        if ( hasChild(key) ) {
+            const Config& uriconf = child(key);
+            if (!uriconf.value().empty()) {
+                output = URI(uriconf.value(), referrer());
+                output->mergeConfig(uriconf);
+                return true;
+            }
+            else return false;
         }
-        else
-            return false;
+        else return false;
     }
 
     // Config specialization for URIAliasMap
 
     template <> inline
-    void Config::addIfSet<URIAliasMap>( const std::string& key, const optional<URIAliasMap>& map ) {
+    void Config::set<URIAliasMap>( const std::string& key, const optional<URIAliasMap>& map ) {
+        remove( key );
         if ( map.isSet() ) {
             Config conf( key );
             for( std::map<std::string,std::string>::const_iterator i = map->_map.begin(); i != map->_map.end(); ++i ) {
@@ -467,20 +452,12 @@ namespace osgEarth
                 alias.add( "target", i->second );
                 conf.add( alias );
             }
-            add(conf);
+            set(conf);
         }
     }
 
     template <> inline
-    void Config::updateIfSet<URIAliasMap>( const std::string& key, const optional<URIAliasMap>& map ) {
-        if ( map.isSet() ) {
-            remove( key );
-            addIfSet( key, map );
-        }
-    }
-
-    template <> inline
-    bool Config::getIfSet<URIAliasMap>( const std::string& key, optional<URIAliasMap>& output ) const {
+    bool Config::get<URIAliasMap>( const std::string& key, optional<URIAliasMap>& output ) const {
         Config alias = child(key);
         if ( !alias.empty() ) {
             for( ConfigSet::const_iterator i = alias.children().begin(); i != alias.children().end(); ++i ) {

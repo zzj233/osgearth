@@ -69,6 +69,7 @@ SimpleOceanLayer::init()
     ss->setDataVariance(ss->DYNAMIC);
     
     VirtualProgram* vp = VirtualProgram::getOrCreate(ss);
+    vp->setName("SimpleOceanLayer");
     Shaders shaders;
     shaders.load(vp, shaders.SimpleOceanLayer_Vertex);
     shaders.load(vp, shaders.SimpleOceanLayer_Fragment);
@@ -223,14 +224,6 @@ SimpleOceanLayer::modifyTileBoundingBox(const TileKey& key, osg::BoundingBox& bo
 {
     // Force the max Z to be at least sea level, to satisfy the culling pass
     box.zMax() = std::max(box.zMax(), (osg::BoundingBox::value_type)0.0);
-}
-
-Config
-SimpleOceanLayer::getConfig() const
-{
-    Config conf = options().getConfig();
-    conf.key() = "simple_ocean";
-    return conf;
 }
 
 void

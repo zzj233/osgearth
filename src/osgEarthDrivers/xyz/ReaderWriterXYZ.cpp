@@ -90,8 +90,7 @@ public:
       }
 
 
-      osg::Image* createImage(const TileKey&     key,
-          ProgressCallback*  progress )
+      osg::Image* createImage(const TileKey& key, ProgressCallback*  progress )
       {
           unsigned x, y;
           key.getTileXY( x, y );
@@ -127,7 +126,9 @@ public:
 
           URI uri( location, _options.url()->context() );
           if ( !cacheKey.empty() )
-              uri.setCacheKey( cacheKey );
+          {
+              uri.setCacheKey(Cache::makeCacheKey(location, "uri"));
+          }
 
           OE_TEST << LC << "URI: " << uri.full() << ", key: " << uri.cacheKey() << std::endl;
 
@@ -139,8 +140,7 @@ public:
           return _format;
       }
 
-      osg::HeightField* createHeightField( const TileKey&        key,
-          ProgressCallback*     progress)
+      osg::HeightField* createHeightField( const TileKey& key, ProgressCallback* progress)
       {
           // MapBox encoded elevation PNG.
           // https://www.mapbox.com/blog/terrain-rgb/

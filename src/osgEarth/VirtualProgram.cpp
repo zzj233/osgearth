@@ -22,6 +22,7 @@
 #include <osgEarth/Capabilities>
 #include <osgEarth/ShaderFactory>
 #include <osgEarth/ShaderUtils>
+#include <osgEarth/ShaderMerger>
 #include <osgEarth/StringUtils>
 #include <osgEarth/Containers>
 #include <osg/Shader>
@@ -35,14 +36,8 @@
 #include <sstream>
 #include <OpenThreads/Thread>
 
-
-#define LC "[VirtualProgram] "
-
 using namespace osgEarth;
 using namespace osgEarth::ShaderComp;
-
-Threading::Mutex PolyShader::_cacheMutex;
-PolyShader::PolyShaderCache PolyShader::_polyShaderCache;
 
 #define OE_TEST OE_NULL
 //#define OE_TEST OE_NOTICE
@@ -50,15 +45,31 @@ PolyShader::PolyShaderCache PolyShader::_polyShaderCache;
 //#define DEBUG_APPLY_COUNTS
 //#define DEBUG_ACCUMULATION
 
-#define USE_STACK_MEMORY 1
+#define MAX_CONTEXTS 16
 
 #define MAX_PROGRAM_CACHE_SIZE 128
 
-#define PREALLOCATE_APPLY_VARS 1
+//#define USE_STACK_MEMORY
 
-#define MAX_CONTEXTS 16
+#define PREALLOCATE_APPLY_VARS
+
+#define USE_PROGRAM_REPO
+
+// Without a program repo, we need to store a refptr to the actual Program somewhere.
+#ifndef USE_PROGRAM_REPO
+    #define USE_LAST_USED_PROGRAM
+#endif
+
+// Don't use this until we make it safe (combine with ProgramRepo or something) -gw
+//#define USE_POLYSHADER_CACHE
 
 #define MAKE_SHADER_ID(X) osgEarth::hashString( X )
+
+
+#ifdef USE_POLYSHADER_CACHE
+Threading::Mutex PolyShader::_cacheMutex;
+PolyShader::PolyShaderCache PolyShader::_polyShaderCache;
+#endif
 
 //------------------------------------------------------------------------
 
@@ -87,6 +98,14 @@ namespace
 
 //------------------------------------------------------------------------
 
+#undef  LC
+#define LC "[ProgramRepo] "
+
+ProgramRepo::~ProgramRepo()
+{
+    releaseGLObjects(NULL);
+}
+
 void
 ProgramRepo::lock()
 {
@@ -108,7 +127,7 @@ ProgramRepo::use(const ProgramKey& key, unsigned frameNumber, UID user)
         e->_frameLastUsed = frameNumber;
         e->_users.insert(user);
 
-        OE_TEST << LC << "PR USE prog=" << e->_program.get() << " user=" << (user) << " total=" << e->_users.size() << std::endl;
+        //OE_TEST << LC << "PR USE prog=" << e->_program.get() << " user=" << (user) << " total=" << e->_users.size() << std::endl;
 
         return e->_program;
     }
@@ -131,33 +150,18 @@ ProgramRepo::release(UID user, osg::State* state)
             // remove "user" from the users list:
             e->_users.erase(user);
             
-            OE_TEST << LC << "PR REL prog=" << (e->_program->getName()) << " user=" << (user) << " total=" << e->_users.size() << std::endl;
+            //OE_TEST << LC << "PR REL prog=" << (e->_program.get()) << " user=" << (user) << " total=" << e->_users.size() << std::endl;
 
             if (e->_users.empty())
             {
-                // when the users list is empty, release the program and remove it
-                // from the repository. But, remove the actual shaders first because
-                // they may be shared with other programs.
-                while(e->_program->getNumShaders() > 0)
-                {
-                    osg::ref_ptr<osg::Shader> shader = e->_program->getShader(0);
-                    e->_program->removeShader(shader.get());
-                    if (shader->referenceCount() == 1)
-                    {
-                        //TODO: look into this; don't think it ever gets called -gw
-                        shader->releaseGLObjects(state);
-                        OE_TEST << LC << "...released shader GL " << shader.get() << std::endl;
-                    }
-                }
-
                 // release the GL memory
                 e->_program->releaseGLObjects(state);
+               
+                OE_TEST << LC << "Released program " << e->_program->getName() << "; dbsize=" << _db.size()-1 << std::endl;
 
                 // remove from the repo
                 _db.erase(i++);
                 increment = false;
-
-                OE_TEST << LC << "...released program GL." << std::endl;
             }            
         }
 
@@ -224,7 +228,24 @@ ProgramRepo::resizeGLObjectBuffers(unsigned maxSize)
     }
 }
 
+void
+ProgramRepo::releaseGLObjects(osg::State* state) const
+{
+    OE_TEST << LC << "Main release, size=" << _db.size() << std::endl;
+    // First try to find an entry with an equivalent program:
+    for(ProgramMap::iterator i = _db.begin(); i != _db.end(); ++i)
+    {
+        osg::ref_ptr<Entry>& e = i->second;
+        e->_program->releaseGLObjects(state);
+        OE_TEST << LC << "...released program " << e->_program->getName() << std::endl;
+    }
+    _db.clear();
+}
+
 //------------------------------------------------------------------------
+
+#undef  LC
+#define LC "[VirtualProgram] "
 
 // environment variable control
 #define OSGEARTH_DUMP_SHADERS  "OSGEARTH_DUMP_SHADERS"
@@ -291,12 +312,18 @@ namespace
     }
 
 
-    void parseShaderForMerging( const std::string& source, unsigned& version, std::string& subversion, HeaderMap& precisions, HeaderMap& headers, std::stringstream& body )
+    void parseShaderForMerging( const std::string& source, unsigned& version, std::string& subversion, HeaderMap& extensions, HeaderMap& precisions, HeaderMap& defblocks, HeaderMap& structs, HeaderMap& headers, HeaderMap& deffuncs, std::stringstream& body )
     {
     
         // types we consider declarations
-        std::string dectypesarray[] = {"void", "uniform", "in", "out", "varying", "bool", "int", "float", "vec2", "vec3", "vec4", "bvec2", "bvec3", "bvec4", "ivec2", "ivec3", "ivec4", "mat2", "mat3", "mat4", "sampler2D", "samplerCube", "lowp", "mediump", "highp", "struct", "attribute", "#extension", "#define"};
+        std::string dectypesarray[] = {"void", "uniform", "in", "out", "varying", "flat", "bool", "int", "uint", "float", "vec2", "vec3", "vec4", "bvec2", "bvec3", "bvec4", "ivec2", "ivec3", "ivec4", "mat2", "mat3", "mat4", "sampler2D", "samplerCube", "lowp", "mediump", "highp", "attribute", "#extension", "#define"};
         std::vector<std::string> dectypes (dectypesarray, dectypesarray + sizeof(dectypesarray) / sizeof(dectypesarray[0]) );
+        
+        // store any structs in this as they need to be decalred first
+        std::string structkeyword = "struct";
+        std::string extensionkeyword = "#extension";
+        std::string startdefsarray[] = {"#if", "#ifdef" };
+        std::vector<std::string> startdefs (startdefsarray, startdefsarray + sizeof(startdefsarray) / sizeof(startdefsarray[0]) );
         
         // break into lines:
         StringVector lines;
@@ -318,11 +345,16 @@ namespace
                 indent -= std::count(line.begin(), line.end(), '}');
                 
                 // we say it's a declaration if it starts with one of the dectyps, has a ; at the end and is in the global scope
-                bool isdec = (std::find(dectypes.begin(), dectypes.end(), tokens[0]) != dectypes.end() && line[line.size()-1] == ';' && indent == 0) || (tokens[0] == "#extension" || tokens[0] == "#define");
+                bool isdec = (std::find(dectypes.begin(), dectypes.end(), tokens[0]) != dectypes.end() && line[line.size()-1] == ';' && indent == 0) || (tokens[0] == "#define");
                 
                 // discard forward declarations of functions, we know it's a declaration so just see if it has brackets (should be safe)
                 bool isfunc = isdec && (line.find("(") != std::string::npos && line.find(")") != std::string::npos);
                 if(isfunc) continue;
+                
+                // is it a struct decleration
+                bool isstruct = tokens[0] == structkeyword && indent == 0;
+                bool isext = tokens[0] == extensionkeyword && indent == 0;
+                bool isdefblock = std::find(startdefs.begin(), startdefs.end(), tokens[0]) != startdefs.end() && indent == 0;
 
                 if (tokens[0] == "#version")
                 {
@@ -352,17 +384,80 @@ namespace
                     if(currentlevel == "mediump" && tokens[1] == "highp") currentlevel = tokens[1];
                 }
 
-                else if (isdec
-                    /*tokens[0] == "#extension"   ||
-                    tokens[0] == "#define"      ||
-                    tokens[0] == "precision"    ||
-                    tokens[0] == "struct"       ||
-                    tokens[0] == "varying"      ||
-                    tokens[0] == "uniform"      ||
-                    tokens[0] == "attribute"*/)
+                else if (isdec)
                 {
-                    std::string& header = headers[line];
-                    header = line;
+                    if(headers.find(line) == headers.end())
+                    {
+                        std::string& header = headers[line];
+                        header = line;
+                    }
+                }
+
+                else if (isext)
+                {
+                    std::string& extline = extensions[line];
+                    extline = line;
+                }
+
+                else if(isstruct)
+                {
+                    // scan forward copying all lines till we hit the closing }; of the struct
+                    std::string& structstr = structs[tokens[1]];
+                    while ((*line_iter) != "};") {
+                        structstr += (*line_iter) + "\n";
+                        line_iter++;
+                    }
+                    structstr += "};\n";
+                }
+                
+                else if(isdefblock)
+                {
+                    // san forward copying all lines till we hit the closing endif
+                    
+                    bool containsext = false;
+                    bool containsfunc = false;
+                    int defindent = 1;
+                    std::string blocktr = "";
+                    while(defindent > 0)
+                    {
+                        blocktr += (*line_iter) + "\n";
+                        line_iter++;
+                        std::string defline = trimAndCompress(*line_iter);
+                        if(defline.size() > 0)
+                        {
+                            StringVector deflinetokens;
+                            StringTokenizer( defline, deflinetokens, " \t", "", false, true );
+                            
+                            bool deflineisdec = (std::find(dectypes.begin(), dectypes.end(), deflinetokens[0]) != dectypes.end() && indent == 0);
+                
+                            // discard forward declarations of functions, we know it's a declaration so just see if it has brackets (should be safe)
+                            bool deflineisfunc = deflineisdec && (defline.find("(") != std::string::npos && defline.find(")") != std::string::npos && defline[defline.size()-1] != ';' );
+                            
+                            if(deflineisfunc) deflineisdec = false;
+                            
+                            if(deflinetokens[0] == extensionkeyword) containsext = true;
+                            if(deflineisfunc) containsfunc = true;
+                            if(deflineisdec)
+                            {
+                                // if the var decleration is inside  a def block endsure it's not added to headers
+                                std::string& header = headers[defline];
+                                header = "";
+                            }
+                            
+                            if(std::find(startdefs.begin(), startdefs.end(), deflinetokens[0]) != startdefs.end()) defindent++;
+                            if(deflinetokens[0] == "#endif")
+                            {
+                                defindent--;
+                                if(defindent == 0)
+                                {
+                                    blocktr += "#endif\n";
+                                }
+                            }
+                        }
+                    }
+                    
+                    std::string& defblock = containsext ? extensions[tokens[1]] : (containsfunc ? deffuncs[tokens[1]] : defblocks[tokens[1]]);
+                    defblock += blocktr; // plus equals for now as could have multiple if defs with same arg / token[1]
                 }
 
                 else
@@ -374,7 +469,11 @@ namespace
         
 #if defined(OSG_GLES3_AVAILABLE)
         // just force gles 3 to use correct version number as shaders in earth files might include a version
+    #if __ANDROID__
+        version = 310;
+    #else
         version = 300;
+    #endif
         subversion = "es";
 #endif
     }
@@ -471,6 +570,16 @@ namespace
         return false;
     }
 
+    std::string getNameForType(osg::Shader::Type type)
+    {
+        return
+            type == osg::Shader::VERTEX ? "VERTEX" :
+            type == osg::Shader::FRAGMENT ? "FRAGMENT" :
+            type == osg::Shader::GEOMETRY ? "GEOMETRY" :
+            type == osg::Shader::TESSCONTROL ? "TESSCONTROL" :
+            "TESSEVAL";
+    }
+
     /**
     * Populates the specified Program with passed-in shaders.
     */
@@ -495,19 +604,60 @@ namespace
         }
 #endif
 
+#if !defined(OSG_GLES2_AVAILABLE) && !defined(OSG_GLES3_AVAILABLE)
+
+        if (s_mergeShaders)
+        {
+            ShaderMerger merger;
+
+            for(VirtualProgram::ShaderVector::const_iterator i = shaders.begin();
+                i != shaders.end();
+                ++i)
+            {
+                if (shaderInStageMask(i->get(), stages))
+                {
+                    merger.add(i->get());
+                }
+            }
+
+            merger.merge(program);
+
+            if (s_dumpShaders)
+            {
+                for(unsigned i=0; i<program->getNumShaders(); ++i)
+                {
+                    osg::Shader* shader = program->getShader(i);
+                    OE_NOTICE << "\n---------MERGED "
+                        << getNameForType(shader->getType())
+                        << " SHADER------------\n"
+                        << shader->getShaderSource()
+                        << std::endl;
+                }
+            }
+        }
+#else
+
         // merge the shaders if necessary.
         if ( s_mergeShaders )
         {
             unsigned          vertVersion = 0;
             std::string       vertSubversion = "";
+            HeaderMap         vertExtensions;
             HeaderMap         vertPrecisions;
+            HeaderMap         vertDefblocks;
+            HeaderMap         vertStructs;
             HeaderMap         vertHeaders;
+            HeaderMap         vertDeffuncs;
             std::stringstream vertBody;
 
             unsigned          fragVersion = 0;
             std::string       fragSubversion = "";
+            HeaderMap         fragExtensions;
             HeaderMap         fragPrecisions;
+            HeaderMap         fragDefblocks;
+            HeaderMap         fragStructs;
             HeaderMap         fragHeaders;
+            HeaderMap         fragDeffuncs;
             std::stringstream fragBody;
 
             // parse the shaders, combining header lines and finding the highest version:
@@ -518,11 +668,11 @@ namespace
                 {
                     if ( s->getType() == osg::Shader::VERTEX )
                     {
-                        parseShaderForMerging( s->getShaderSource(), vertVersion, vertSubversion, vertPrecisions, vertHeaders, vertBody );
+                        parseShaderForMerging( s->getShaderSource(), vertVersion, vertSubversion, vertExtensions, vertPrecisions, vertDefblocks, vertStructs, vertHeaders, vertDeffuncs, vertBody );
                     }
                     else if ( s->getType() == osg::Shader::FRAGMENT )
                     {
-                        parseShaderForMerging( s->getShaderSource(), fragVersion, fragSubversion, fragPrecisions, fragHeaders, fragBody );
+                        parseShaderForMerging( s->getShaderSource(), fragVersion, fragSubversion, fragExtensions, fragPrecisions, fragDefblocks, fragStructs, fragHeaders, fragDeffuncs, fragBody );
                     }
                 }
             }
@@ -538,14 +688,30 @@ namespace
                 vertShaderBuf << "\n";
             }
 
+#if __ANDROID__
+            vertShaderBuf << "#extension GL_EXT_shader_io_blocks : require\n";
+#endif
+            for( HeaderMap::const_iterator h = vertExtensions.begin(); h != vertExtensions.end(); ++h )
+                vertShaderBuf << h->second << "\n";
+
             if(vertPrecisions.size() > 0) {
                 for(HeaderMap::iterator pitr = vertPrecisions.begin(); pitr != vertPrecisions.end(); ++pitr) {
                     vertShaderBuf << "precision " << pitr->second << " " << pitr->first << "\n";
                 }
             }
+            
+            for( HeaderMap::const_iterator h = vertDefblocks.begin(); h != vertDefblocks.end(); ++h )
+                vertShaderBuf << h->second << "\n";
+            
+            for( HeaderMap::const_iterator h = vertStructs.begin(); h != vertStructs.end(); ++h )
+                vertShaderBuf << h->second << "\n";
 
             for( HeaderMap::const_iterator h = vertHeaders.begin(); h != vertHeaders.end(); ++h )
                 vertShaderBuf << h->second << "\n";
+            
+            for( HeaderMap::const_iterator h = vertDeffuncs.begin(); h != vertDeffuncs.end(); ++h )
+                vertShaderBuf << h->second << "\n";
+            
             vertShaderBuf << vertBodyText << "\n";
             vertBodyText = vertShaderBuf.str();
 
@@ -562,18 +728,36 @@ namespace
             }
 
 #if defined(OSG_GLES3_AVAILABLE)
+    #if __ANDROID__
+            fragShaderBuf << "#extension GL_EXT_shader_io_blocks : require\n";
+    #endif
+
             // ensure there's a default for floats in the frag shader
             std::string& defaultFragFloat = fragPrecisions["float;"];
             if(defaultFragFloat.size() == 0) defaultFragFloat = "highp";
 #endif
+
+            for( HeaderMap::const_iterator h = fragExtensions.begin(); h != fragExtensions.end(); ++h )
+                fragShaderBuf << h->second << "\n";
+
             if(fragPrecisions.size() > 0) {
                 for(HeaderMap::iterator pitr = fragPrecisions.begin(); pitr != fragPrecisions.end(); ++pitr) {
                     fragShaderBuf << "precision " << pitr->second << " " << pitr->first << "\n";
                 }
             }
+            
+            for( HeaderMap::const_iterator h = fragDefblocks.begin(); h != fragDefblocks.end(); ++h )
+                fragShaderBuf << h->second << "\n";
+            
+            for( HeaderMap::const_iterator h = fragStructs.begin(); h != fragStructs.end(); ++h )
+                fragShaderBuf << h->second << "\n";
 
             for( HeaderMap::const_iterator h = fragHeaders.begin(); h != fragHeaders.end(); ++h )
                 fragShaderBuf << h->second << "\n";
+            
+            for( HeaderMap::const_iterator h = fragDeffuncs.begin(); h != fragDeffuncs.end(); ++h )
+                fragShaderBuf << h->second << "\n";
+            
             fragShaderBuf << fragBodyText << "\n";
             fragBodyText = fragShaderBuf.str();
 
@@ -589,6 +773,8 @@ namespace
                     << "MERGED FRAGMENT SHADER: \n\n" << fragBodyText << "\n" << std::endl;
             }
         }
+#endif
+
         else
         {
             if ( !s_dumpShaders )
@@ -701,7 +887,7 @@ namespace
         buildVector.reserve( accumShaderMap.size() + mains.size() );
 
         for(ProgramKey::iterator i = outputKey.begin(); i != outputKey.end(); ++i)
-            buildVector.push_back( i->get()->getShader(stages) );
+            buildVector.push_back( (*i)->getShader(stages) );
 
         buildVector.insert( buildVector.end(), mains.begin(), mains.end() );
 
@@ -923,6 +1109,11 @@ _isAbstract        ( false )
     // osg::Program methods..)
     _template = new osg::Program();
 
+
+#ifdef USE_LAST_USED_PROGRAM
+    _lastUsedProgram.resize(MAX_CONTEXTS);
+#endif
+
 #ifdef PREALLOCATE_APPLY_VARS
     _apply.resize(MAX_CONTEXTS);
 #endif
@@ -954,6 +1145,11 @@ _isAbstract        ( rhs._isAbstract )
     {
         addBindAttribLocation( attribute->first, attribute->second );
     }
+
+
+#ifdef USE_LAST_USED_PROGRAM
+    _lastUsedProgram.resize(MAX_CONTEXTS);
+#endif
     
 #ifdef PREALLOCATE_APPLY_VARS
     _apply.resize(MAX_CONTEXTS);
@@ -966,12 +1162,16 @@ _isAbstract        ( rhs._isAbstract )
 
 VirtualProgram::~VirtualProgram()
 {
+#ifdef USE_PROGRAM_REPO
     if (Registry::instance())
     {
         Registry::programRepo().lock();
         Registry::programRepo().release(_id, 0L);
         Registry::programRepo().unlock();
     }
+#endif
+
+    OE_TEST << LC << "~VP (" << _id << ") " << getName() << std::endl;
 }
 
 int
@@ -1071,19 +1271,20 @@ VirtualProgram::compileGLObjects(osg::State& state) const
 void
 VirtualProgram::resizeGLObjectBuffers(unsigned maxSize)
 {
+#ifdef USE_PROGRAM_REPO
     Registry::programRepo().lock();
-
     Registry::programRepo().resizeGLObjectBuffers(maxSize);
+    Registry::programRepo().unlock();
+#endif
 
     // Resize shaders in the PolyShader
     for( ShaderMap::iterator i = _shaderMap.begin(); i != _shaderMap.end(); ++i )
     {
         if (i->data()._shader.valid())
         {
-            i->data()._shader->resizeGLObjectBuffers(maxSize );
+            i->data()._shader->resizeGLObjectBuffers(maxSize);
         }
     }
-    Registry::programRepo().unlock();
 }
 
 void
@@ -1092,11 +1293,33 @@ VirtualProgram::releaseGLObjects(osg::State* state) const
     if (s_disableVPRelease)
         return;
 
-    //OE_INFO << LC << "VirtualProgram::releaseGLObjects (" << (this) << ")" << std::endl;
-
+    OE_TEST << LC << "VP::RGLO (" << _id << ") " << getName() << " (" << (_lastUsedProgram[0].get()) << ") state=" << (uintptr_t)state << std::endl;
+    
+#ifdef USE_PROGRAM_REPO
     Registry::programRepo().lock();
     Registry::programRepo().release(_id, state);
     Registry::programRepo().unlock();
+#endif
+
+#ifdef USE_LAST_USED_PROGRAM
+    if (state)
+    {
+        const osg::Program* p = _lastUsedProgram[state->getContextID()].get();
+        if (p)
+            p->releaseGLObjects(state);
+    }
+    else
+    {
+        for(unsigned i=0; i<_lastUsedProgram.size(); ++i)
+        {
+            const osg::Program* p = _lastUsedProgram[i].get();
+            if (p)
+                p->releaseGLObjects(state);
+        }
+    }
+    _lastUsedProgram.setAllElementsTo(NULL);
+
+#endif
 }
 
 PolyShader*
@@ -1255,58 +1478,42 @@ VirtualProgram::setFunction(const std::string&           functionName,
 void 
 VirtualProgram::setFunctionMinRange(const std::string& name, float minRange)
 {
-    // lock the functions map while making changes:
-    _dataModelMutex.lock();
-
-    checkSharing();
-
-    ShaderComp::Function* function;
-    if ( findFunction(name, _functions, &function) )
-    {
-        function->_minRange = minRange;
-    }
-
-    _dataModelMutex.unlock();
+    OE_DEPRECATED(VirtualProgram::setFunctionMinRange, shaders) << std::endl;
 }
 
 void 
 VirtualProgram::setFunctionMaxRange(const std::string& name, float maxRange)
 {
-    // lock the functions map while making changes:
-    _dataModelMutex.lock();
-
-    checkSharing();
-
-    ShaderComp::Function* function;
-    if ( findFunction(name, _functions, &function) )
-    {
-        function->_maxRange = maxRange;
-    }
-
-    _dataModelMutex.unlock();
+    OE_DEPRECATED(VirtualProgram::setFunctionMaxRange, shaders) << std::endl;
 }
 
-bool VirtualProgram::addGLSLExtension(const std::string& extension)
+bool
+VirtualProgram::addGLSLExtension(const std::string& extension)
 {
    _dataModelMutex.lock();
    std::pair<std::set<std::string>::const_iterator, bool> insertPair = _globalExtensions.insert(extension);
    _dataModelMutex.unlock();
    return insertPair.second;
 }
-bool VirtualProgram::hasGLSLExtension(const std::string& extension) const
+
+bool
+VirtualProgram::hasGLSLExtension(const std::string& extension) const
 {
    _dataModelMutex.lock();
    bool doesHave = _globalExtensions.find(extension)!=_globalExtensions.end();
    _dataModelMutex.unlock();
    return doesHave;
 }
-bool VirtualProgram::removeGLSLExtension(const std::string& extension)
+
+bool
+VirtualProgram::removeGLSLExtension(const std::string& extension)
 {
    _dataModelMutex.lock();
    int erased = _globalExtensions.erase(extension);
    _dataModelMutex.unlock();
    return erased > 0;
 }
+
 void
 VirtualProgram::removeShader( const std::string& shaderID )
 {
@@ -1344,12 +1551,14 @@ VirtualProgram::setInheritShaders( bool value )
     {
         _inherit = value;
 
+#ifdef USE_PROGRAM_REPO
         // clear the program cache please
         {
             Registry::programRepo().lock();
             Registry::programRepo().release(_id, 0L);
             Registry::programRepo().unlock();
         }
+#endif
 
         _inheritSet = true;
     }
@@ -1359,6 +1568,8 @@ VirtualProgram::setInheritShaders( bool value )
 void
 VirtualProgram::apply( osg::State& state ) const
 {
+    OE_TEST << LC << "Applying (" << this << ") " << getName() << std::endl;
+
     if (_active.isSetTo(false))
     {
         return;
@@ -1487,10 +1698,12 @@ VirtualProgram::apply( osg::State& state ) const
         // current frame number, for shader program expiry.
         unsigned frameNumber = state.getFrameStamp() ? state.getFrameStamp()->getFrameNumber() : 0;
 
+#ifdef USE_PROGRAM_REPO
         // LOCK the program repo to look up the program.
         Registry::programRepo().lock();
 
         program = Registry::programRepo().use(local.programKey, frameNumber, _id);
+#endif
 
         if (!program.valid())
         {
@@ -1541,12 +1754,14 @@ VirtualProgram::apply( osg::State& state ) const
                 }
             }
 
+#ifdef USE_PROGRAM_REPO
             // Adds this program to the repo, or finds an equivalent pre-existing program
             // in the repo and associates this program key with it.
             Registry::programRepo().add(local.programKey, program, frameNumber, _id);
 
             // purge expired programs.
             Registry::programRepo().prune(frameNumber, &state);
+#endif
         }
         Registry::programRepo().unlock();
     }
@@ -1624,12 +1839,21 @@ VirtualProgram::apply( osg::State& state ) const
             }
         }
 
-        //program->apply( state );
-
 #if 0 // test code for detecting race conditions
         for(int i=0; i<10000; ++i) {
             state.setLastAppliedProgramObject(0L);
             program->apply( state );
+        }
+#endif
+
+#ifdef USE_LAST_USED_PROGRAM
+        _lastUsedProgram[contextID] = program.get();
+#endif
+
+#if 0 // breakpoint for testing
+        if (state.checkGLErrors(this))
+        {
+            int x=0;
         }
 #endif
     }
@@ -2048,19 +2272,24 @@ void PolyShader::releaseGLObjects(osg::State* state) const
    }
 }
 
-PolyShader* PolyShader::lookUpShader(const std::string& functionName, const std::string& shaderSource, ShaderComp::FunctionLocation location)
+PolyShader*
+PolyShader::lookUpShader(const std::string& functionName, const std::string& shaderSource, ShaderComp::FunctionLocation location)
 {
+   PolyShader* shader = NULL;
+   
+#ifdef USE_POLYSHADER_CACHE
+
+   Threading::ScopedMutexLock lock(_cacheMutex);
 
    std::pair<std::string, std::string> hashKey = std::pair<std::string, std::string>(functionName, shaderSource);
 
-   _cacheMutex.lock();
-   
    PolyShaderCache::iterator iter = _polyShaderCache.find(hashKey);
  
-   PolyShader* shader = NULL;
-   if (iter != _polyShaderCache.end()) {
+   if (iter != _polyShaderCache.end())
+   {
       shader = iter->second.get();
    }
+#endif
 
    if (!shader)
    {
@@ -2074,10 +2303,12 @@ PolyShader* PolyShader::lookUpShader(const std::string& functionName, const std:
       shader->setLocation(location);
       shader->setShaderSource(source);
       shader->prepare();
-      //_polyShaderCache[hashKey] = shader;
+
+#ifdef USE_POLYSHADER_CACHE
+      _polyShaderCache[hashKey] = shader;
+#endif
    }
 
-   _cacheMutex.unlock();
    return shader;
 }
 

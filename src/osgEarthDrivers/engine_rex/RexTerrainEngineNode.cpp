@@ -148,8 +148,6 @@ namespace
 RexTerrainEngineNode::RexTerrainEngineNode() :
 TerrainEngineNode     ( ),
 _terrain              ( 0L ),
-_tileCount            ( 0 ),
-_tileCreationTime     ( 0.0 ),
 _batchUpdateInProgress( false ),
 _refreshRequired      ( false ),
 _stateUpdateRequired  ( false ),
@@ -182,8 +180,8 @@ _rasterizer(0L)
 
     // TODO: replace with a "renderer" object that can return statesets
     // for different layer types, or something.
-    _imageLayerStateSet = new osg::StateSet();
-    _imageLayerStateSet->setName("Surface");
+    _surfaceStateSet = new osg::StateSet();
+    _surfaceStateSet->setName("Surface");
 
     _terrain = new osg::Group();
     addChild(_terrain.get());
@@ -428,7 +426,7 @@ RexTerrainEngineNode::refresh(bool forceDirty)
 osg::StateSet*
 RexTerrainEngineNode::getSurfaceStateSet()
 {
-    return _imageLayerStateSet.get();
+    return _surfaceStateSet.get();
 }
 
 void
@@ -474,7 +472,7 @@ RexTerrainEngineNode::setupRenderBindings()
     colorParent.samplerName() = "oe_layer_texParent";
     colorParent.matrixName()  = "oe_layer_texParentMatrix";
     if (this->parentTexturesRequired())
-        getResources()->reserveTextureImageUnit(colorParent.unit(), "Terrain Color (Parent)");
+        getResources()->reserveTextureImageUnit(colorParent.unit(), "Terrain Parent Color");
 
     // Apply a default, empty texture to each render binding.
     OE_DEBUG << LC << "Render Bindings:\n";
@@ -651,6 +649,7 @@ RexTerrainEngineNode::traverse(osg::NodeVisitor& nv)
         LayerDrawable* lastLayer = 0L;
         unsigned order = 0;
         bool surfaceStateSetPushed = false;
+        bool imageLayerStateSetPushed = false;
         int layersDrawn = 0;
 
         osg::State::StateSetStack stateSetStack;
@@ -663,21 +662,47 @@ RexTerrainEngineNode::traverse(osg::NodeVisitor& nv)
             if (!i->get()->_tiles.empty())
             {
                 lastLayer = i->get();
-                lastLayer->_order = -1;
 
-                // if this is a RENDERTYPE_TERRAIN_SURFACE, we need to activate the default surface state set.
+                // if this is a RENDERTYPE_TERRAIN_SURFACE, we need to activate either the
+                // default surface state set or the image layer state set.
                 if (lastLayer->_renderType == Layer::RENDERTYPE_TERRAIN_SURFACE)
                 {
-                    lastLayer->_order = order++;
-
                     if (!surfaceStateSetPushed)
-                        cv->pushStateSet(getSurfaceStateSet());
-                    surfaceStateSetPushed = true;
+                    {
+                        cv->pushStateSet(_surfaceStateSet.get());
+                        surfaceStateSetPushed = true;
+                    }
+
+                    if (lastLayer->_imageLayer || lastLayer->_layer == NULL)
+                    {
+                        if (!imageLayerStateSetPushed)
+                        {
+                            cv->pushStateSet(_imageLayerStateSet.get());
+                            imageLayerStateSetPushed = true;
+                        }
+                    }
+                    else
+                    {
+                        if (imageLayerStateSetPushed)
+                        {
+                            cv->popStateSet();
+                            imageLayerStateSetPushed = false;
+                        }
+                    }
                 }
-                else if (surfaceStateSetPushed)
+
+                else
                 {
-                    cv->popStateSet();
-                    surfaceStateSetPushed = false;
+                    if (imageLayerStateSetPushed)
+                    {
+                        cv->popStateSet();
+                        imageLayerStateSetPushed = false;
+                    }
+                    if (surfaceStateSetPushed)
+                    {
+                        cv->popStateSet();
+                        surfaceStateSetPushed = false;
+                    }
                 }
 
                 //OE_INFO << "   Apply: " << (lastLayer->_layer ? lastLayer->_layer->getName() : "-1") << "; tiles=" << lastLayer->_tiles.size() << std::endl;
@@ -717,6 +742,12 @@ RexTerrainEngineNode::traverse(osg::NodeVisitor& nv)
         if (lastLayer)
         {
             lastLayer->_clearOsgState = true;
+        }
+
+        if (imageLayerStateSetPushed)
+        {
+            cv->popStateSet();
+            imageLayerStateSetPushed = false;
         }
 
         if (surfaceStateSetPushed)
@@ -1230,12 +1261,6 @@ RexTerrainEngineNode::addTileLayer(Layer* tileLayer)
                     }
                 }
             }
-
-            // For an image layer, attach the default fragment shader:
-            Shaders shaders;
-            osg::StateSet* stateSet = imageLayer->getOrCreateStateSet();
-            VirtualProgram* vp = VirtualProgram::getOrCreate(stateSet);
-            shaders.load(vp, shaders.ENGINE_FRAG);
         }
 
         else
@@ -1336,7 +1361,7 @@ RexTerrainEngineNode::removeElevationLayer( ElevationLayer* layerRemoved )
 void
 RexTerrainEngineNode::moveElevationLayer(ElevationLayer* layerMoved)
 {
-    if ( layerMoved->getEnabled() == false )
+    if (layerMoved->getEnabled() == false)
         return;
 
     // only need to refresh is the elevation layer is visible.
@@ -1347,7 +1372,7 @@ RexTerrainEngineNode::moveElevationLayer(ElevationLayer* layerMoved)
 }
 
 void
-RexTerrainEngineNode::toggleElevationLayer( ElevationLayer* layer )
+RexTerrainEngineNode::toggleElevationLayer(ElevationLayer* layer)
 {
     refresh();
 }
@@ -1356,7 +1381,7 @@ RexTerrainEngineNode::toggleElevationLayer( ElevationLayer* layer )
 void
 RexTerrainEngineNode::updateState()
 {
-    if ( _batchUpdateInProgress )
+    if (_batchUpdateInProgress)
     {
         _stateUpdateRequired = true;
     }
@@ -1367,200 +1392,196 @@ RexTerrainEngineNode::updateState()
 
         osg::StateSet* surfaceStateSet = getSurfaceStateSet();    // just the surface
 
-        //terrainStateSet->setRenderBinDetails(0, "SORT_FRONT_TO_BACK");
-
         // required for multipass tile rendering to work
         surfaceStateSet->setAttributeAndModes(
-            new osg::Depth(osg::Depth::LEQUAL, 0, 1, true) );
+            new osg::Depth(osg::Depth::LEQUAL, 0, 1, true));
 
         surfaceStateSet->setAttributeAndModes(
             new osg::CullFace(), osg::StateAttribute::ON);
 
         // activate standard mix blending.
         terrainStateSet->setAttributeAndModes(
-            new osg::BlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA),
-            osg::StateAttribute::ON );
+            new osg::BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA),
+            osg::StateAttribute::ON);
 
         // install patch param if we are tessellation on the GPU.
-        if ( _terrainOptions.gpuTessellation() == true )
+        if (_terrainOptions.gpuTessellation() == true)
         {
-            #ifdef HAVE_PATCH_PARAMETER
-              terrainStateSet->setAttributeAndModes( new osg::PatchParameter(3) );
-            #endif
+#ifdef HAVE_PATCH_PARAMETER
+            terrainStateSet->setAttributeAndModes(new osg::PatchParameter(3));
+#endif
         }
 
-        // install shaders, if we're using them.
-        if ( Registry::capabilities().supportsGLSL() )
+        Shaders package;
+
+        VirtualProgram* terrainVP = VirtualProgram::getOrCreate(terrainStateSet);
+        terrainVP->setName("Rex Terrain");
+        package.load(terrainVP, package.ENGINE_VERT_MODEL);
+
+        surfaceStateSet->addUniform(new osg::Uniform("oe_terrain_color", _terrainOptions.color().get()));
+
+        surfaceStateSet->setDefine("OE_TERRAIN_RENDER_IMAGERY");
+
+        // Functions that affect only the terrain surface:
+        VirtualProgram* surfaceVP = VirtualProgram::getOrCreate(surfaceStateSet);
+        surfaceVP->setName("Rex Surface");
+
+        // Functions that affect the terrain surface only:
+        package.load(surfaceVP, package.ENGINE_VERT_VIEW);
+        package.load(surfaceVP, package.ENGINE_ELEVATION_MODEL);
+        //package.load(surfaceVP, package.ENGINE_FRAG);
+
+        // Elevation?
+        if (this->elevationTexturesRequired())
         {
-            Shaders package;
+            surfaceStateSet->setDefine("OE_TERRAIN_RENDER_ELEVATION");
+        }
 
-            VirtualProgram* terrainVP = VirtualProgram::getOrCreate(terrainStateSet);
-            terrainVP->setName( "Rex Terrain" );
-            package.load(terrainVP, package.ENGINE_VERT_MODEL);
+        // Normal mapping shaders:
+        if (this->normalTexturesRequired())
+        {
+            package.load(surfaceVP, package.NORMAL_MAP_VERT);
+            package.load(surfaceVP, package.NORMAL_MAP_FRAG);
+            surfaceStateSet->setDefine("OE_TERRAIN_RENDER_NORMAL_MAP");
+        }
 
-            surfaceStateSet->addUniform(new osg::Uniform("oe_terrain_color", _terrainOptions.color().get()));
+        if (_terrainOptions.enableBlending() == true)
+        {
+            surfaceStateSet->setDefine("OE_TERRAIN_BLEND_IMAGERY");
+        } 
 
-            surfaceStateSet->setDefine("OE_TERRAIN_RENDER_IMAGERY");
+        if (_terrainOptions.compressNormalMaps() == true)
+        {
+            surfaceStateSet->setDefine("OE_COMPRESSED_NORMAL_MAP");
+        }
 
-            // Functions that affect only the terrain surface:
-            VirtualProgram* surfaceVP = VirtualProgram::getOrCreate(surfaceStateSet);
-            surfaceVP->setName("Rex Surface");
+        // Morphing?
+        if (_terrainOptions.morphTerrain() == true ||
+            _terrainOptions.morphImagery() == true)
+        {
+            package.load(surfaceVP, package.MORPHING_VERT);
 
-            // Functions that affect the terrain surface only:
-            package.load(surfaceVP, package.ENGINE_VERT_VIEW);
-            package.load(surfaceVP, package.ENGINE_ELEVATION_MODEL);
-            //package.load(surfaceVP, package.ENGINE_FRAG);
-
-            // Elevation?
-            if (this->elevationTexturesRequired())
+            if (_terrainOptions.morphImagery() == true)
             {
-                surfaceStateSet->setDefine("OE_TERRAIN_RENDER_ELEVATION");
+                surfaceStateSet->setDefine("OE_TERRAIN_MORPH_IMAGERY");
             }
-
-            // Normal mapping shaders:
-            if ( this->normalTexturesRequired() )
+            if (_terrainOptions.morphTerrain() == true)
             {
-                package.load(surfaceVP, package.NORMAL_MAP_VERT);
-                package.load(surfaceVP, package.NORMAL_MAP_FRAG);
-                surfaceStateSet->setDefine("OE_TERRAIN_RENDER_NORMAL_MAP");
+                surfaceStateSet->setDefine("OE_TERRAIN_MORPH_GEOMETRY");
             }
+        }
 
-            if (_terrainOptions.enableBlending() == true)
+        // Shadowing?
+        if (_terrainOptions.castShadows() == true)
+        {
+            surfaceStateSet->setDefine("OE_TERRAIN_CAST_SHADOWS");
+        }
+
+        // assemble color filter code snippets.
+        bool haveColorFilters = false;
+        {
+            // Color filter frag function:
+            std::string fs_colorfilters =
+                "#version " GLSL_VERSION_STR "\n"
+                GLSL_DEFAULT_PRECISION_FLOAT "\n"
+                "uniform int oe_layer_uid; \n"
+                "$COLOR_FILTER_HEAD"
+                "void oe_rexEngine_applyFilters(inout vec4 color) \n"
+                "{ \n"
+                    "$COLOR_FILTER_BODY"
+                "} \n";
+
+            std::stringstream cf_head;
+            std::stringstream cf_body;
+            const char* I = "    ";
+
+            bool ifStarted = false;
+            ImageLayerVector imageLayers;
+            getMap()->getLayers(imageLayers);
+
+            for( int i=0; i<imageLayers.size(); ++i )
             {
-                surfaceStateSet->setDefine("OE_TERRAIN_BLEND_IMAGERY");
-            }
-
-            // Morphing?
-            if (_terrainOptions.morphTerrain() == true ||
-                _terrainOptions.morphImagery() == true)
-            {
-                package.load(surfaceVP, package.MORPHING_VERT);
-
-                if (_terrainOptions.morphImagery() == true)
+                ImageLayer* layer = imageLayers[i].get();
+                if ( layer->getEnabled() )
                 {
-                    surfaceStateSet->setDefine("OE_TERRAIN_MORPH_IMAGERY");
-                }
-                if (_terrainOptions.morphTerrain() == true)
-                {
-                    surfaceStateSet->setDefine("OE_TERRAIN_MORPH_GEOMETRY");
-                }
-            }
-
-            // Shadowing?
-            if (_terrainOptions.castShadows() == true)
-            {
-                surfaceStateSet->setDefine("OE_TERRAIN_CAST_SHADOWS");
-            }
-
-            // assemble color filter code snippets.
-            bool haveColorFilters = false;
-            {
-                // Color filter frag function:
-                std::string fs_colorfilters =
-                    "#version " GLSL_VERSION_STR "\n"
-                    GLSL_DEFAULT_PRECISION_FLOAT "\n"
-                    "uniform int oe_layer_uid; \n"
-                    "$COLOR_FILTER_HEAD"
-                    "void oe_rexEngine_applyFilters(inout vec4 color) \n"
-                    "{ \n"
-                        "$COLOR_FILTER_BODY"
-                    "} \n";
-
-                std::stringstream cf_head;
-                std::stringstream cf_body;
-                const char* I = "    ";
-
-                bool ifStarted = false;
-                ImageLayerVector imageLayers;
-                getMap()->getLayers(imageLayers);
-
-                for( int i=0; i<imageLayers.size(); ++i )
-                {
-                    ImageLayer* layer = imageLayers[i].get();
-                    if ( layer->getEnabled() )
+                    // install Color Filter function calls:
+                    const ColorFilterChain& chain = layer->getColorFilters();
+                    if ( chain.size() > 0 )
                     {
-                        // install Color Filter function calls:
-                        const ColorFilterChain& chain = layer->getColorFilters();
-                        if ( chain.size() > 0 )
+                        haveColorFilters = true;
+                        if ( ifStarted ) cf_body << I << "else if ";
+                        else             cf_body << I << "if ";
+                        cf_body << "(oe_layer_uid == " << layer->getUID() << ") {\n";
+                        for( ColorFilterChain::const_iterator j = chain.begin(); j != chain.end(); ++j )
                         {
-                            haveColorFilters = true;
-                            if ( ifStarted ) cf_body << I << "else if ";
-                            else             cf_body << I << "if ";
-                            cf_body << "(oe_layer_uid == " << layer->getUID() << ") {\n";
-                            for( ColorFilterChain::const_iterator j = chain.begin(); j != chain.end(); ++j )
-                            {
-                                const ColorFilter* filter = j->get();
-                                cf_head << "void " << filter->getEntryPointFunctionName() << "(inout vec4 color);\n";
-                                cf_body << I << I << filter->getEntryPointFunctionName() << "(color);\n";
-                                filter->install( surfaceStateSet );
-                            }
-                            cf_body << I << "}\n";
-                            ifStarted = true;
+                            const ColorFilter* filter = j->get();
+                            cf_head << "void " << filter->getEntryPointFunctionName() << "(inout vec4 color);\n";
+                            cf_body << I << I << filter->getEntryPointFunctionName() << "(color);\n";
+                            filter->install( surfaceStateSet );
                         }
+                        cf_body << I << "}\n";
+                        ifStarted = true;
                     }
                 }
-
-                if ( haveColorFilters )
-                {
-                    std::string cf_head_str, cf_body_str;
-                    cf_head_str = cf_head.str();
-                    cf_body_str = cf_body.str();
-
-                    replaceIn( fs_colorfilters, "$COLOR_FILTER_HEAD", cf_head_str );
-                    replaceIn( fs_colorfilters, "$COLOR_FILTER_BODY", cf_body_str );
-
-                    surfaceVP->setFunction(
-                        "oe_rexEngine_applyFilters",
-                        fs_colorfilters,
-                        ShaderComp::LOCATION_FRAGMENT_COLORING,
-                        0.6 );
-                }
             }
+
+            if ( haveColorFilters )
+            {
+                std::string cf_head_str, cf_body_str;
+                cf_head_str = cf_head.str();
+                cf_body_str = cf_body.str();
+
+                replaceIn( fs_colorfilters, "$COLOR_FILTER_HEAD", cf_head_str );
+                replaceIn( fs_colorfilters, "$COLOR_FILTER_BODY", cf_body_str );
+
+                surfaceVP->setFunction(
+                    "oe_rexEngine_applyFilters",
+                    fs_colorfilters,
+                    ShaderComp::LOCATION_FRAGMENT_COLORING,
+                    0.6 );
+            }
+        }
 
 #if 0
-            // Apply uniforms for sampler bindings:
-            OE_DEBUG << LC << "Render Bindings:\n";
-            osg::ref_ptr<osg::Texture> tex = new osg::Texture2D(ImageUtils::createEmptyImage(1,1));
-            for (unsigned i = 0; i < _renderBindings.size(); ++i)
+        // Apply uniforms for sampler bindings:
+        OE_DEBUG << LC << "Render Bindings:\n";
+        osg::ref_ptr<osg::Texture> tex = new osg::Texture2D(ImageUtils::createEmptyImage(1,1));
+        for (unsigned i = 0; i < _renderBindings.size(); ++i)
+        {
+            SamplerBinding& b = _renderBindings[i];
+            if (b.isActive())
             {
-                SamplerBinding& b = _renderBindings[i];
-                if (b.isActive())
-                {
-                    osg::Uniform* u = new osg::Uniform(b.samplerName().c_str(), b.unit());
-                    terrainStateSet->addUniform( u );
-                    OE_DEBUG << LC << " > Bound \"" << b.samplerName() << "\" to unit " << b.unit() << "\n";
-                    terrainStateSet->setTextureAttribute(b.unit(), tex.get());
-                }
+                osg::Uniform* u = new osg::Uniform(b.samplerName().c_str(), b.unit());
+                terrainStateSet->addUniform( u );
+                OE_DEBUG << LC << " > Bound \"" << b.samplerName() << "\" to unit " << b.unit() << "\n";
+                terrainStateSet->setTextureAttribute(b.unit(), tex.get());
             }
+        }
 #endif
 
-            // uniform that controls per-layer opacity
-            terrainStateSet->addUniform( new osg::Uniform("oe_layer_opacity", 1.0f) );
+        // uniform that conveys the layer UID to the shaders; necessary
+        // for per-layer branching (like color filters)
+        // UID -1 => no image layer (no texture)
+        terrainStateSet->addUniform( new osg::Uniform("oe_layer_uid", (int)-1 ) );
 
-            // uniform that conveys the layer UID to the shaders; necessary
-            // for per-layer branching (like color filters)
-            // UID -1 => no image layer (no texture)
-            terrainStateSet->addUniform( new osg::Uniform("oe_layer_uid", (int)-1 ) );
+        // uniform that conveys the render order, since the shaders
+        // need to know which is the first layer in order to blend properly
+        terrainStateSet->addUniform( new osg::Uniform("oe_layer_order", (int)0) );
 
-            // uniform that conveys the render order, since the shaders
-            // need to know which is the first layer in order to blend properly
-            terrainStateSet->addUniform( new osg::Uniform("oe_layer_order", (int)0) );
+        // default min/max range uniforms. (max < min means ranges are disabled)
+        terrainStateSet->addUniform( new osg::Uniform("oe_terrain_attenuationRange", _terrainOptions.attenuationDistance().get()) );
 
-            // default min/max range uniforms. (max < min means ranges are disabled)
-            terrainStateSet->addUniform( new osg::Uniform("oe_layer_minRange", 0.0f) );
-            terrainStateSet->addUniform( new osg::Uniform("oe_layer_maxRange", -1.0f) );
-            terrainStateSet->addUniform( new osg::Uniform("oe_layer_attenuationRange", _terrainOptions.attenuationDistance().get()) );
+        terrainStateSet->addUniform(new osg::Uniform("oe_tile_size", (float)_terrainOptions.tileSize().get()));
 
-            terrainStateSet->getOrCreateUniform(
-                "oe_min_tile_range_factor",
-                osg::Uniform::FLOAT)->set( *_terrainOptions.minTileRangeFactor() );
-
-            terrainStateSet->addUniform(new osg::Uniform("oe_tile_size", (float)_terrainOptions.tileSize().get()));
-
-            // special object ID that denotes the terrain surface.
-            surfaceStateSet->addUniform( new osg::Uniform(
-                Registry::objectIndex()->getObjectIDUniformName().c_str(), OSGEARTH_OBJECTID_TERRAIN) );
-        }
+        // special object ID that denotes the terrain surface.
+        surfaceStateSet->addUniform( new osg::Uniform(
+            Registry::objectIndex()->getObjectIDUniformName().c_str(), OSGEARTH_OBJECTID_TERRAIN) );
+        
+        // For an image layer, attach the default fragment shader:
+        //_imageLayerStateSet = osg::clone(surfaceStateSet, osg::CopyOp::DEEP_COPY_ALL);
+        _imageLayerStateSet = new osg::StateSet();
+        VirtualProgram* vp = VirtualProgram::getOrCreate(_imageLayerStateSet.get());
+        package.load(vp, package.ENGINE_FRAG);
 
         _stateUpdateRequired = false;
     }

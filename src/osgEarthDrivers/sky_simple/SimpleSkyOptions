@@ -38,7 +38,11 @@ namespace osgEarth { namespace SimpleSky
           _exposure            (2.4f),
           _daytimeAmbientBoost (5.0f),
           _allowWireframe      (false),
-          _starSize            (14.0f)
+          _starSize            (14.0f),
+		  _sunVisible(true),
+          _moonVisible(true),
+          _starsVisible(true),
+          _atmosphereVisible(true)
         {
             setDriver( "simple" );
             fromConfig( _conf );
@@ -74,15 +78,35 @@ namespace osgEarth { namespace SimpleSky
         optional<bool>& allowWireframe() { return _allowWireframe; }
         const optional<bool>& allowWireframe() const { return _allowWireframe; }
 
+		/** Whether the Sun is visible. This has no effect on lighting. */
+        optional<bool>& sunVisible() { return _sunVisible; }
+        const optional<bool>& sunVisible() const { return _sunVisible; }
+
+        /** Whether the Moon is visible */
+        optional<bool>& moonVisible() { return _moonVisible; }
+        const optional<bool>& moonVisible() const { return _moonVisible; }
+
+        /** Whether the stars are visible */
+        optional<bool>& starsVisible() { return _starsVisible; }
+        const optional<bool>& starsVisible() const { return _starsVisible; }
+
+        /** Whether the Earth's atmosphere is visible */
+        optional<bool>& atmosphereVisible() { return _atmosphereVisible; }
+        const optional<bool>& atmosphereVisible() const { return _atmosphereVisible; }
+
     public:
         Config getConfig() const {
             Config conf = SkyOptions::getConfig();
-            conf.addIfSet("atmospheric_lighting", _atmosphericLighting);
-            conf.addIfSet("exposure", _exposure);
-            conf.addIfSet("daytime_ambient_boost", _daytimeAmbientBoost);
-            conf.addIfSet("star_file", _starFile);
-            conf.addIfSet("star_size", _starSize);
-            conf.addIfSet("allow_wireframe", _allowWireframe);
+            conf.set("atmospheric_lighting", _atmosphericLighting);
+            conf.set("exposure", _exposure);
+            conf.set("daytime_ambient_boost", _daytimeAmbientBoost);
+            conf.set("star_file", _starFile);
+            conf.set("star_size", _starSize);
+            conf.set("allow_wireframe", _allowWireframe);
+			conf.set("sun_visible", _sunVisible);
+            conf.set("moon_visible", _moonVisible);
+            conf.set("stars_visible", _starsVisible);
+            conf.set("atmosphere_visible", _atmosphereVisible);
             return conf;
         }
 
@@ -94,12 +118,16 @@ namespace osgEarth { namespace SimpleSky
 
     private:
         void fromConfig( const Config& conf ) {
-            conf.getIfSet("atmospheric_lighting", _atmosphericLighting);
-            conf.getIfSet("exposure", _exposure);
-            conf.getIfSet("daytime_ambient_boost", _daytimeAmbientBoost);
-            conf.getIfSet("star_file", _starFile);
-            conf.getIfSet("star_size", _starSize);
-            conf.getIfSet("allow_wireframe", _allowWireframe);
+            conf.get("atmospheric_lighting", _atmosphericLighting);
+            conf.get("exposure", _exposure);
+            conf.get("daytime_ambient_boost", _daytimeAmbientBoost);
+            conf.get("star_file", _starFile);
+            conf.get("star_size", _starSize);
+            conf.get("allow_wireframe", _allowWireframe);
+			conf.get("sun_visible", _sunVisible);
+            conf.get("moon_visible", _moonVisible);
+            conf.get("stars_visible", _starsVisible);
+            conf.get("atmosphere_visible", _atmosphereVisible);
         }
 
         optional<bool>        _atmosphericLighting;
@@ -108,6 +136,10 @@ namespace osgEarth { namespace SimpleSky
         optional<std::string> _starFile;
         optional<float>       _starSize;
         optional<bool>        _allowWireframe;
+		optional<bool>        _sunVisible;
+        optional<bool>        _moonVisible;
+        optional<bool>        _starsVisible;
+        optional<bool>        _atmosphereVisible;
     };
 
 } } // namespace osgEarth::SimpleSky

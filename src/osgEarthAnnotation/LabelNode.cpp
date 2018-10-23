@@ -26,7 +26,6 @@
 #include <osgEarthAnnotation/BboxDrawable>
 #include <osgEarthSymbology/Color>
 #include <osgEarthSymbology/BBoxSymbol>
-#include <osgEarth/Registry>
 #include <osgEarth/ShaderGenerator>
 #include <osgEarth/GeoMath>
 #include <osgEarth/Utils>
@@ -47,7 +46,8 @@ using namespace osgEarth::Symbology;
 
 //-------------------------------------------------------------------
 
-osg::ref_ptr<osg::StateSet> LabelNode::_geodeStateSet;
+// Globally shared stateset for LabelNode geometry
+osg::observer_ptr<osg::StateSet> LabelNode::s_geodeStateSet;
 
 LabelNode::LabelNode() :
 GeoPositionNode()
@@ -87,29 +87,33 @@ LabelNode::construct()
     _labelRotationRad = 0.0f;
     _followFixedCourse = false;
 
-    // Create and apply the shared LabelNode stateset:
-    if (!_geodeStateSet.valid())
+    // This class makes its own shaders
+    ShaderGenerator::setIgnoreHint(this, true);
+
+    // Initialize the shared stateset as necessary
+    osg::ref_ptr<osg::StateSet> geodeStateSet;
+    if (s_geodeStateSet.lock(geodeStateSet) == false)
     {
         static Threading::Mutex s_mutex;
-        s_mutex.lock();
-        if (!_geodeStateSet.valid())
+        Threading::ScopedMutexLock lock(s_mutex);
+
+        if (s_geodeStateSet.lock(geodeStateSet) == false)
         {
-            _geodeStateSet = new osg::StateSet();
+            s_geodeStateSet = geodeStateSet = new osg::StateSet();
 
             // draw in the screen-space bin
-            ScreenSpaceLayout::activate(_geodeStateSet.get());
+            ScreenSpaceLayout::activate(geodeStateSet.get());
 
             // completely disable depth buffer
-            _geodeStateSet->setAttributeAndModes( new osg::Depth(osg::Depth::ALWAYS, 0, 1, false), 1 ); 
+            geodeStateSet->setAttributeAndModes( new osg::Depth(osg::Depth::ALWAYS, 0, 1, false), 1 ); 
 
             // Disable lighting for place label bbox
-            _geodeStateSet->setDefine(OE_LIGHTING_DEFINE, osg::StateAttribute::OFF | osg::StateAttribute::PROTECTED);
+            geodeStateSet->setDefine(OE_LIGHTING_DEFINE, osg::StateAttribute::OFF | osg::StateAttribute::PROTECTED);
         }
-        s_mutex.unlock();
     }
 
     _geode = new osg::Geode();
-    _geode->setStateSet(_geodeStateSet.get());
+    _geode->setStateSet(geodeStateSet.get());
 
     // ensure that (0,0,0) is the bounding sphere control/center point.
     // useful for things like horizon culling.
@@ -181,7 +185,7 @@ LabelNode::compile()
     const BBoxSymbol* bboxsymbol = _style.get<BBoxSymbol>();
     if ( bboxsymbol && text )
     {
-        osg::Drawable* bboxGeom = new BboxDrawable( Utils::getBoundingBox(text), *bboxsymbol );
+        osg::Drawable* bboxGeom = new BboxDrawable(text->getBoundingBox(), *bboxsymbol );
         if (bboxGeom)
         {
             _geode->addDrawable(bboxGeom);
@@ -316,8 +320,8 @@ GeoPositionNode( conf, dbOptions )
 {
     construct();
 
-    conf.getObjIfSet("style", _style);
-    conf.getIfSet("text", _text);
+    conf.get("style", _style);
+    conf.get("text", _text);
 
     compile();
 }
@@ -326,8 +330,8 @@ Config
 LabelNode::getConfig() const
 {
     Config conf( "label" );
-    conf.add   ( "text",   _text );
-    conf.addObj( "style",  _style );
+    conf.set( "text",   _text );
+    conf.set( "style",  _style );
 
     return conf;
 }

@@ -324,8 +324,11 @@ namespace osgEarth
          GeoPoint _center;
          double   _radius;
      };
+}
+OSGEARTH_SPECIALIZE_CONFIG(osgEarth::GeoPoint);
 
-
+namespace osgEarth
+{
     /**
      * An axis-aligned geospatial extent. A bounding box that is aligned with a
      * spatial reference's coordinate system.
@@ -472,7 +475,7 @@ namespace osgEarth
          */
         void expandToInclude( double x, double y ); 
         void expandToInclude( const osg::Vec3d& v ) { expandToInclude(v.x(), v.y()); }
-        void expandToInclude( const Bounds& bounds );
+        //void expandToInclude( const Bounds& bounds );
 
         /**
          * Expand this extent to include the bounds of another extent.
@@ -546,6 +549,7 @@ namespace osgEarth
 
         void setOriginAndSize(double west, double south, double width, double height);
     };
+
 
     /**
      * A geospatial area with tile data LOD extents
@@ -822,16 +826,9 @@ namespace osgEarth
          * Gets a pointer to the underlying OSG heightfield.
          */
         const osg::HeightField* getHeightField() const;
-        osg::HeightField* getHeightField();
 
         //! Normal map
         const NormalMap* getNormalMap() const;
-        NormalMap* getNormalMap();
-
-        /**
-         * Gets a pointer to the underlying OSG heightfield, and releases the internal reference.
-         */
-        osg::HeightField* takeHeightField();
 
         /**
          * Gets the X interval of this GeoHeightField

@@ -104,8 +104,11 @@ namespace osgEarth
         optional<bool>           _coverage;
         optional<std::string>    _osgOptionString;
     };
+}
+OSGEARTH_SPECIALIZE_CONFIG(osgEarth::TileSourceOptions);
 
-
+namespace osgEarth
+{
     /**
      * A collection of tiles that should be considered blacklisted
      */
@@ -266,7 +269,7 @@ namespace osgEarth
          * image with one 32-bit channel and call storeImage.)
          */
         virtual bool storeHeightField(const TileKey&    key,
-                                      osg::HeightField* hf,
+                                      const osg::HeightField* hf,
                                       ProgressCallback* progress);
 
     public:

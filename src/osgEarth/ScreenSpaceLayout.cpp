@@ -53,11 +53,12 @@ namespace
     {
         bool operator()( const osgUtil::RenderLeaf* lhs, const osgUtil::RenderLeaf* rhs ) const
         {
-            const osg::Node* lhsParentNode = lhs->getDrawable()->getParent(0);
-            if ( lhsParentNode == rhs->getDrawable()->getParent(0) )
+            if (lhs->getDrawable()->getNumParents() > 0 &&
+                rhs->getDrawable()->getNumParents() > 0 &&
+                rhs->getDrawable()->getParent(0) == lhs->getDrawable()->getParent(0))
             {
-                const osg::Geode* geode = static_cast<const osg::Geode*>(lhsParentNode);
-                return geode->getDrawableIndex(lhs->getDrawable()) > geode->getDrawableIndex(rhs->getDrawable());
+                const osg::Group* parent = static_cast<const osg::Group*>(lhs->getDrawable()->getParent(0));
+                return parent->getChildIndex(lhs->getDrawable()) > parent->getChildIndex(rhs->getDrawable());
             }
             else
             {
@@ -72,11 +73,12 @@ namespace
     {
         bool operator()( const osgUtil::RenderLeaf* lhs, const osgUtil::RenderLeaf* rhs ) const
         {
-            const osg::Node* lhsParentNode = lhs->getDrawable()->getParent(0);
-            if ( lhsParentNode == rhs->getDrawable()->getParent(0) )
+            if (lhs->getDrawable()->getNumParents() > 0 &&
+                rhs->getDrawable()->getNumParents() > 0 &&
+                rhs->getDrawable()->getParent(0) == lhs->getDrawable()->getParent(0))
             {
-                const osg::Geode* geode = static_cast<const osg::Geode*>(lhsParentNode);
-                return geode->getDrawableIndex(lhs->getDrawable()) > geode->getDrawableIndex(rhs->getDrawable());
+                const osg::Group* parent = static_cast<const osg::Group*>(lhs->getDrawable()->getParent(0));
+                return parent->getChildIndex(lhs->getDrawable()) > parent->getChildIndex(rhs->getDrawable());
             }
 
             else
@@ -163,30 +165,30 @@ namespace
 void
 ScreenSpaceLayoutOptions::fromConfig( const Config& conf )
 {
-    conf.getIfSet( "min_animation_scale", _minAnimScale );
-    conf.getIfSet( "min_animation_alpha", _minAnimAlpha );
-    conf.getIfSet( "in_animation_time",   _inAnimTime );
-    conf.getIfSet( "out_animation_time",  _outAnimTime );
-    conf.getIfSet( "sort_by_priority",    _sortByPriority );
-    conf.getIfSet( "sort_by_distance",    _sortByDistance);
-    conf.getIfSet( "snap_to_pixel",       _snapToPixel );
-    conf.getIfSet( "max_objects",         _maxObjects );
-    conf.getIfSet( "render_order",        _renderBinNumber );
+    conf.get( "min_animation_scale", _minAnimScale );
+    conf.get( "min_animation_alpha", _minAnimAlpha );
+    conf.get( "in_animation_time",   _inAnimTime );
+    conf.get( "out_animation_time",  _outAnimTime );
+    conf.get( "sort_by_priority",    _sortByPriority );
+    conf.get( "sort_by_distance",    _sortByDistance);
+    conf.get( "snap_to_pixel",       _snapToPixel );
+    conf.get( "max_objects",         _maxObjects );
+    conf.get( "render_order",        _renderBinNumber );
 }
 
 Config
 ScreenSpaceLayoutOptions::getConfig() const
 {
     Config conf;
-    conf.addIfSet( "min_animation_scale", _minAnimScale );
-    conf.addIfSet( "min_animation_alpha", _minAnimAlpha );
-    conf.addIfSet( "in_animation_time",   _inAnimTime );
-    conf.addIfSet( "out_animation_time",  _outAnimTime );
-    conf.addIfSet( "sort_by_priority",    _sortByPriority );
-    conf.addIfSet( "sort_by_distance",    _sortByDistance);
-    conf.addIfSet( "snap_to_pixel",       _snapToPixel );
-    conf.addIfSet( "max_objects",         _maxObjects );
-    conf.addIfSet( "render_order",        _renderBinNumber );
+    conf.set( "min_animation_scale", _minAnimScale );
+    conf.set( "min_animation_alpha", _minAnimAlpha );
+    conf.set( "in_animation_time",   _inAnimTime );
+    conf.set( "out_animation_time",  _outAnimTime );
+    conf.set( "sort_by_priority",    _sortByPriority );
+    conf.set( "sort_by_distance",    _sortByDistance);
+    conf.set( "snap_to_pixel",       _snapToPixel );
+    conf.set( "max_objects",         _maxObjects );
+    conf.set( "render_order",        _renderBinNumber );
     return conf;
 }
 
@@ -359,12 +361,12 @@ struct /*internal*/ DeclutterSort : public osgUtil::RenderBin::SortCallback
 
             osgUtil::RenderLeaf* leaf = *i;
             const osg::Drawable* drawable = leaf->getDrawable();
-            const osg::Node*     drawableParent = drawable->getParent(0);
+            const osg::Node*     drawableParent = drawable->getNumParents()? drawable->getParent(0) : 0L;
 
             const ScreenSpaceLayoutData* layoutData = dynamic_cast<const ScreenSpaceLayoutData*>(drawable->getUserData());
 
             // transform the bounding box of the drawable into window-space.
-            osg::BoundingBox box = Utils::getBoundingBox(drawable);
+            osg::BoundingBox box = drawable->getBoundingBox();
 
             osg::Vec3f offset;
             osg::Quat rot;
@@ -468,7 +470,7 @@ struct /*internal*/ DeclutterSort : public osgUtil::RenderBin::SortCallback
                 }
 
                 // if this leaf is already in a culled group, skip it.
-                else if ( culledParents.find(drawableParent) != culledParents.end() )
+                else if ( drawableParent != 0L && culledParents.find(drawableParent) != culledParents.end() )
                 {
                     visible = false;
                 }
@@ -502,7 +504,9 @@ struct /*internal*/ DeclutterSort : public osgUtil::RenderBin::SortCallback
             {
                 // passed the test, so add the leaf's bbox to the "used" list, and add the leaf
                 // to the final draw list.
-                local._used.push_back( std::make_pair(drawableParent, box) );
+                if (drawableParent)
+                    local._used.push_back( std::make_pair(drawableParent, box) );
+
                 local._passed.push_back( leaf );
             }
 
@@ -510,7 +514,9 @@ struct /*internal*/ DeclutterSort : public osgUtil::RenderBin::SortCallback
             {
                 // culled, so put the parent in the parents list so that any future leaves
                 // with the same parent will be trivially rejected
-                culledParents.insert( drawable->getParent(0) );
+                if (drawableParent)
+                    culledParents.insert(drawableParent);
+
                 local._failed.push_back( leaf );
             }
 
@@ -545,8 +551,9 @@ struct /*internal*/ DeclutterSort : public osgUtil::RenderBin::SortCallback
             {
                 osgUtil::RenderLeaf* leaf     = *i;
                 const osg::Drawable* drawable = leaf->getDrawable();
+                const osg::Node* drawableParent = drawable->getNumParents() > 0 ? drawable->getParent(0) : 0L;
 
-                if ( culledParents.find( drawable->getParent(0) ) == culledParents.end() )
+                if ( drawableParent == 0L || culledParents.find(drawableParent) == culledParents.end() )
                 {
                     DrawableInfo& info = local._memory[drawable];
 
@@ -832,6 +839,7 @@ public:
             if (!_vpInstalled)
             {
                 VirtualProgram* vp = VirtualProgram::getOrCreate(getStateSet());
+                vp->setName("ScreenSpaceLayout");
                 vp->setFunction( "oe_declutter_apply_fade", s_faderFS, ShaderComp::LOCATION_FRAGMENT_COLORING, 0.5f );
                 _vpInstalled = true;
                 OE_INFO << LC << "Decluttering VP installed\n";
@@ -878,9 +886,12 @@ ScreenSpaceLayout::activate(osg::StateSet* stateSet) //, int binNum)
             binNum,
             OSGEARTH_SCREEN_SPACE_LAYOUT_BIN,
             osg::StateSet::OVERRIDE_PROTECTED_RENDERBIN_DETAILS);
-
+        
         // Force a single shared layout bin per render stage
         stateSet->setNestRenderBins( false );
+
+        // Range opacity is not supported for screen-space rendering
+        stateSet->setDefine("OE_DISABLE_RANGE_OPACITY");
     }
 }
 
@@ -982,13 +993,17 @@ namespace osgEarth
                                        public ScreenSpaceLayoutOptions
     {
     public:
-        META_osgEarth_Extension(ScreenSpaceLayoutExtension);
+        META_OE_Extension(osgEarth, ScreenSpaceLayoutExtension, screen_space_layout);
+
+        ScreenSpaceLayoutExtension() { }
 
         ScreenSpaceLayoutExtension(const ConfigOptions& co) : ScreenSpaceLayoutOptions(co)
         {
             // sets the global default options.
             ScreenSpaceLayout::setOptions(*this);
         }
+
+        const ConfigOptions& getConfigOptions() const { return *this; }
     };
 
     REGISTER_OSGEARTH_EXTENSION(osgearth_screen_space_layout, ScreenSpaceLayoutExtension);

@@ -37,6 +37,7 @@
 #include <osg/TexGen>
 #include <osg/TexMat>
 #include <osg/ClipNode>
+#include <osg/Point>
 #include <osg/PointSprite>
 #include <osgDB/FileNameUtils>
 #include <osgDB/FileUtils>
@@ -287,13 +288,6 @@ namespace
 #if !defined(OSG_GL_FIXED_FUNCTION_AVAILABLE)
             // No modes in non-ffp
             return true;
-#endif
-
-#if OSG_VERSION_LESS_THAN(3,3,1)
-            return
-                dynamic_cast<osg::Texture2DArray*>(sa) ||
-                dynamic_cast<osg::Texture2DMultisample*>(sa) ||
-				dynamic_cast<osg::TextureBuffer*>(sa);
 #else
             return false;
 #endif
@@ -692,35 +686,7 @@ ShaderGenerator::apply(osg::ProxyNode& node)
 void
 ShaderGenerator::apply(osg::ClipNode& node)
 {
-#if 0 // DEPRECATED
-
-    static const char* s_clip_source =
-        "#version " GLSL_VERSION_STR "\n"
-        GLSL_PRECISION "\n"
-        "uniform vec4 oe_sg_clipnode_plane_model; \n"
-        "void oe_sg_clipnode(inout vec4 vertex_view)\n"
-        "{\n"
-        "    vec4 plane_view = gl_ModelViewMatrix * oe_sg_clipnode_plane_model; \n"
-        "    gl_ClipDistance[0] = dot(plane_view, vertex_view); \n"
-        //"    gl_ClipVertex = vertexVIEW; \n"
-        "}\n";
-
-    if ( !_active )
-        return;
-
-    if ( ignore(&node) )
-        return;
-
-    osg::StateSet* stateSet = cloneOrCreateStateSet(&node);
-    VirtualProgram* vp = VirtualProgram::getOrCreate(stateSet);
-    if ( vp->referenceCount() == 1 ) vp->setName( _name );
-    vp->setFunction( "oe_sg_clipnode", s_clip_source, ShaderComp::LOCATION_VERTEX_VIEW, 0.95f );
-
-    osg::Uniform* plane = new osg::Uniform("oe_sg_clipnode_plane_model", osg::Uniform::FLOAT_VEC4);
-    plane->set(osg::Vec4f(node.getClipPlane(0)->getClipPlane()));
-    stateSet->addUniform(plane);
-#endif
-
+    // no longer needed
     apply( static_cast<osg::Group&>(node) );
 }
 
@@ -1317,8 +1283,20 @@ ShaderGenerator::apply(osg::StateSet::AttributeList& attrs, GenBuffers& buf)
 bool
 ShaderGenerator::apply(osg::StateAttribute* attr, GenBuffers& buf)
 {
-    // NOP for now.
-    return false;
+    bool addedSomething = false;
+
+#if defined(OSG_GLES3_AVAILABLE)
+    osg::Point* asPoint = dynamic_cast<osg::Point*>(attr);
+    if(asPoint != NULL)
+    {
+        buf._viewHead << "uniform float oe_sg_pointSize;\n";
+        buf._viewBody << INDENT << "gl_PointSize = oe_sg_pointSize;\n";
+        buf._stateSet->getOrCreateUniform( "oe_sg_pointSize", osg::Uniform::FLOAT )->set( asPoint->getSize() );
+        addedSomething = true;
+    }
+#endif
+    
+    return addedSomething;
 }
 
 void
@@ -1326,13 +1304,4 @@ ShaderGenerator::disableUnsupportedAttributes(osg::StateSet* stateset)
 {
     if (!stateset)
         return;
-
-#if 0
-#if !defined(OSG_GL_FIXED_FUNCTION_AVAILABLE)
-    stateset->removeAttribute(osg::StateAttribute::TEXENV);
-    stateset->removeAttribute(osg::StateAttribute::TEXENVFILTER);
-    stateset->removeAttribute(osg::StateAttribute::TEXGEN);
-    stateset->removeAttribute(osg::StateAttribute::LIGHTMODEL);
-#endif
-#endif
 }

@@ -154,7 +154,7 @@ TileSourceOptions::getConfig() const
     conf.set( "bilinear_reprojection", _bilinearReprojection );
     conf.set( "coverage", _coverage );
     conf.set( "osg_option_string", _osgOptionString );
-    conf.setObj( "profile", _profileOptions );
+    conf.set( "profile", _profileOptions );
     return conf;
 }
 
@@ -170,12 +170,12 @@ TileSourceOptions::mergeConfig( const Config& conf )
 void
 TileSourceOptions::fromConfig( const Config& conf )
 {
-    conf.getIfSet( "blacklist_filename", _blacklistFilename);
-    conf.getIfSet( "l2_cache_size", _L2CacheSize );
-    conf.getIfSet( "bilinear_reprojection", _bilinearReprojection );
-    conf.getIfSet( "coverage", _coverage );
-    conf.getIfSet( "osg_option_string", _osgOptionString );
-    conf.getObjIfSet( "profile", _profileOptions );
+    conf.get( "blacklist_filename", _blacklistFilename);
+    conf.get( "l2_cache_size", _L2CacheSize );
+    conf.get( "bilinear_reprojection", _bilinearReprojection );
+    conf.get( "coverage", _coverage );
+    conf.get( "osg_option_string", _osgOptionString );
+    conf.get( "profile", _profileOptions );
 }
 
 
@@ -413,8 +413,8 @@ TileSource::createHeightField(const TileKey&        key,
 
 bool
 TileSource::storeHeightField(const TileKey&     key,
-                             osg::HeightField*  hf,
-                              ProgressCallback* progress)
+                             const osg::HeightField*  hf,
+                             ProgressCallback* progress)
 {
     if (getStatus().isError() || hf == 0L )
         return 0L;

@@ -53,7 +53,7 @@ Config LayerOptions::getConfig() const
     conf.set("enabled", _enabled);
     conf.set("cacheid", _cacheId);
     if (_cachePolicy.isSet() && !_cachePolicy->empty())
-        conf.setObj("cache_policy", _cachePolicy);
+        conf.set("cache_policy", _cachePolicy);
     conf.set("shader_define", _shaderDefine);
     conf.set("shader", _shader);
     conf.set("attribution", _attribution);
@@ -65,12 +65,12 @@ void LayerOptions::fromConfig(const Config& conf)
 {
     setDefaults();
 
-    conf.getIfSet("name", _name);
-    conf.getIfSet("enabled", _enabled);
-    conf.getIfSet("cache_id", _cacheId); // compat
-    conf.getIfSet("cacheid", _cacheId);
-    conf.getIfSet("attribution", _attribution);
-    conf.getObjIfSet("cache_policy", _cachePolicy);
+    conf.get("name", _name);
+    conf.get("enabled", _enabled);
+    conf.get("cache_id", _cacheId); // compat
+    conf.get("cacheid", _cacheId);
+    conf.get("attribution", _attribution);
+    conf.get("cache_policy", _cachePolicy);
 
     // legacy support:
     if (!_cachePolicy.isSet())
@@ -80,11 +80,11 @@ void LayerOptions::fromConfig(const Config& conf)
         if ( conf.value<bool>( "cache_enabled", true ) == false )
             _cachePolicy->usage() = CachePolicy::USAGE_NO_CACHE;
     }
-    conf.getIfSet("shader_define", _shaderDefine);
-    conf.getIfSet("shader", _shader);
+    conf.get("shader_define", _shaderDefine);
+    conf.get("shader", _shader);
 
-    conf.getIfSet("terrain", _terrainPatch);
-    conf.getIfSet("patch", _terrainPatch);
+    conf.get("terrain", _terrainPatch);
+    conf.get("patch", _terrainPatch);
 }
 
 void LayerOptions::mergeConfig(const Config& conf)
@@ -179,7 +179,9 @@ Layer::getCacheID() const
 Config
 Layer::getConfig() const
 {
-    return options().getConfig();
+    Config conf = options().getConfig();
+    conf.key() = getConfigKey();
+    return conf;
 }
 
 bool
@@ -233,6 +235,7 @@ Layer::open()
     {
         OE_INFO << LC << "Installing inline shader code\n";
         VirtualProgram* vp = VirtualProgram::getOrCreate(this->getOrCreateStateSet());
+        vp->setName("Layer shader");
         ShaderPackage package;
         package.add("", options().shader().get());
         package.loadAll(vp, getReadOptions());
@@ -385,4 +388,24 @@ void
 Layer::setAttribution(const std::string& attribution)
 {
     _options->attribution() = attribution;
+}
+
+void
+Layer::resizeGLObjectBuffers(unsigned maxSize)
+{
+    osg::Object::resizeGLObjectBuffers(maxSize);
+    if (getNode())
+        getNode()->resizeGLObjectBuffers(maxSize);
+    if (getStateSet())
+        getStateSet()->resizeGLObjectBuffers(maxSize);
+}
+
+void
+Layer::releaseGLObjects(osg::State* state) const
+{
+    osg::Object::releaseGLObjects(state);
+    if (getNode())
+        getNode()->releaseGLObjects(state);
+    if (getStateSet())
+        getStateSet()->releaseGLObjects(state);
 }

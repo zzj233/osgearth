@@ -88,6 +88,40 @@ bool GraticuleLabelingEngine::getVisible(osg::Camera* camera)
 }
 
 void
+GraticuleLabelingEngine::UpdateLabelStyles::operator()(GraticuleLabelingEngine::CameraData& data)
+{
+    for(GraticuleLabelingEngine::LabelNodeVector::iterator i = data.xLabels.begin();
+        i != data.xLabels.end();
+        ++i)
+    {
+        i->get()->setStyle(*_xStyle);
+    }
+
+    for(GraticuleLabelingEngine::LabelNodeVector::iterator i = data.yLabels.begin();
+        i != data.yLabels.end();
+        ++i)
+    {
+        i->get()->setStyle(*_yStyle);
+    }
+}
+
+void
+GraticuleLabelingEngine::setStyle(const Style& style)
+{
+    setStyles(style, style);
+}
+
+void
+GraticuleLabelingEngine::setStyles(const Style& xStyle, const Style& yStyle)
+{
+    _xLabelStyle = xStyle;
+    _yLabelStyle = yStyle;
+
+    UpdateLabelStyles update(_xLabelStyle, _yLabelStyle);
+    _cameraDataMap.forEach(update);
+}
+
+void
 GraticuleLabelingEngine::AcceptCameraData::operator()(GraticuleLabelingEngine::CameraData& data)
 {
     for (LabelNodeVector::iterator i = data.xLabels.begin(); i != data.xLabels.end(); ++i)

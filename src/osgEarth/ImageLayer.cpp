@@ -70,8 +70,6 @@ void
 ImageLayerOptions::setDefaults()
 {
     _transparentColor.init( osg::Vec4ub(0,0,0,0) );
-    _minRange.init( 0.0 );
-    _maxRange.init( FLT_MAX );
     _featherPixels.init( false );
     _minFilter.init( osg::Texture::LINEAR_MIPMAP_LINEAR );
     _magFilter.init( osg::Texture::LINEAR );
@@ -90,12 +88,10 @@ ImageLayerOptions::mergeConfig( const Config& conf )
 void
 ImageLayerOptions::fromConfig(const Config& conf)
 {
-    conf.getIfSet( "nodata_image",   _noDataImageFilename );
-    conf.getIfSet( "min_range",      _minRange );
-    conf.getIfSet( "max_range",      _maxRange );
-    conf.getIfSet( "shared",         _shared );
-    conf.getIfSet( "coverage",       _coverage );
-    conf.getIfSet( "feather_pixels", _featherPixels);
+    conf.get( "nodata_image",   _noDataImageFilename );
+    conf.get( "shared",         _shared );
+    conf.get( "coverage",       _coverage );
+    conf.get( "feather_pixels", _featherPixels);
 
     if ( conf.hasValue( "transparent_color" ) )
         _transparentColor = stringToColor( conf.value( "transparent_color" ), osg::Vec4ub(0,0,0,0));
@@ -106,38 +102,35 @@ ImageLayerOptions::fromConfig(const Config& conf)
         ColorFilterRegistry::instance()->readChain( conf.child("color_filters"), _colorFilters );
     }
 
-    conf.getIfSet("mag_filter","LINEAR",                _magFilter,osg::Texture::LINEAR);
-    conf.getIfSet("mag_filter","LINEAR_MIPMAP_LINEAR",  _magFilter,osg::Texture::LINEAR_MIPMAP_LINEAR);
-    conf.getIfSet("mag_filter","LINEAR_MIPMAP_NEAREST", _magFilter,osg::Texture::LINEAR_MIPMAP_NEAREST);
-    conf.getIfSet("mag_filter","NEAREST",               _magFilter,osg::Texture::NEAREST);
-    conf.getIfSet("mag_filter","NEAREST_MIPMAP_LINEAR", _magFilter,osg::Texture::NEAREST_MIPMAP_LINEAR);
-    conf.getIfSet("mag_filter","NEAREST_MIPMAP_NEAREST",_magFilter,osg::Texture::NEAREST_MIPMAP_NEAREST);
-    conf.getIfSet("min_filter","LINEAR",                _minFilter,osg::Texture::LINEAR);
-    conf.getIfSet("min_filter","LINEAR_MIPMAP_LINEAR",  _minFilter,osg::Texture::LINEAR_MIPMAP_LINEAR);
-    conf.getIfSet("min_filter","LINEAR_MIPMAP_NEAREST", _minFilter,osg::Texture::LINEAR_MIPMAP_NEAREST);
-    conf.getIfSet("min_filter","NEAREST",               _minFilter,osg::Texture::NEAREST);
-    conf.getIfSet("min_filter","NEAREST_MIPMAP_LINEAR", _minFilter,osg::Texture::NEAREST_MIPMAP_LINEAR);
-    conf.getIfSet("min_filter","NEAREST_MIPMAP_NEAREST",_minFilter,osg::Texture::NEAREST_MIPMAP_NEAREST);
+    conf.get("mag_filter","LINEAR",                _magFilter,osg::Texture::LINEAR);
+    conf.get("mag_filter","LINEAR_MIPMAP_LINEAR",  _magFilter,osg::Texture::LINEAR_MIPMAP_LINEAR);
+    conf.get("mag_filter","LINEAR_MIPMAP_NEAREST", _magFilter,osg::Texture::LINEAR_MIPMAP_NEAREST);
+    conf.get("mag_filter","NEAREST",               _magFilter,osg::Texture::NEAREST);
+    conf.get("mag_filter","NEAREST_MIPMAP_LINEAR", _magFilter,osg::Texture::NEAREST_MIPMAP_LINEAR);
+    conf.get("mag_filter","NEAREST_MIPMAP_NEAREST",_magFilter,osg::Texture::NEAREST_MIPMAP_NEAREST);
+    conf.get("min_filter","LINEAR",                _minFilter,osg::Texture::LINEAR);
+    conf.get("min_filter","LINEAR_MIPMAP_LINEAR",  _minFilter,osg::Texture::LINEAR_MIPMAP_LINEAR);
+    conf.get("min_filter","LINEAR_MIPMAP_NEAREST", _minFilter,osg::Texture::LINEAR_MIPMAP_NEAREST);
+    conf.get("min_filter","NEAREST",               _minFilter,osg::Texture::NEAREST);
+    conf.get("min_filter","NEAREST_MIPMAP_LINEAR", _minFilter,osg::Texture::NEAREST_MIPMAP_LINEAR);
+    conf.get("min_filter","NEAREST_MIPMAP_NEAREST",_minFilter,osg::Texture::NEAREST_MIPMAP_NEAREST);
 
-    conf.getIfSet("texture_compression", "none", _texcomp, osg::Texture::USE_IMAGE_DATA_FORMAT);
-    conf.getIfSet("texture_compression", "auto", _texcomp, (osg::Texture::InternalFormatMode)~0);
-    conf.getIfSet("texture_compression", "fastdxt", _texcomp, (osg::Texture::InternalFormatMode)(~0 - 1));
+    conf.get("texture_compression", "none", _texcomp, osg::Texture::USE_IMAGE_DATA_FORMAT);
+    conf.get("texture_compression", "auto", _texcomp, (osg::Texture::InternalFormatMode)~0);
+    conf.get("texture_compression", "fastdxt", _texcomp, (osg::Texture::InternalFormatMode)(~0 - 1));
     //TODO add all the enums
 
     // uniform names
-    conf.getIfSet("shared_sampler", _shareTexUniformName);
-    conf.getIfSet("shared_matrix",  _shareTexMatUniformName);
+    conf.get("shared_sampler", _shareTexUniformName);
+    conf.get("shared_matrix",  _shareTexMatUniformName);
 }
 
 Config
 ImageLayerOptions::getConfig() const
 {
     Config conf = TerrainLayerOptions::getConfig();
-    conf.key() = "image";
 
     conf.set( "nodata_image",   _noDataImageFilename );
-    conf.set( "min_range",      _minRange );
-    conf.set( "max_range",      _maxRange );
     conf.set( "shared",         _shared );
     conf.set( "coverage",       _coverage );
     conf.set( "feather_pixels", _featherPixels );
@@ -150,7 +143,7 @@ ImageLayerOptions::getConfig() const
         Config filtersConf("color_filters");
         if ( ColorFilterRegistry::instance()->writeChain( _colorFilters, filtersConf ) )
         {
-            conf.update( filtersConf );
+            conf.set( filtersConf );
         }
     }
 
@@ -365,32 +358,6 @@ ImageLayer::fireCallback(ImageLayerCallback::MethodPtr method)
         ImageLayerCallback* cb = dynamic_cast<ImageLayerCallback*>(i->get());
         if (cb) (cb->*method)( this );
     }
-}
-
-void
-ImageLayer::setMinVisibleRange( float minVisibleRange )
-{
-    options().minVisibleRange() = minVisibleRange;
-    fireCallback( &ImageLayerCallback::onVisibleRangeChanged );
-}
-
-float
-ImageLayer::getMinVisibleRange() const
-{
-    return options().minVisibleRange().get();
-}
-
-void
-ImageLayer::setMaxVisibleRange( float maxVisibleRange )
-{
-    options().maxVisibleRange() = maxVisibleRange;
-    fireCallback( &ImageLayerCallback::onVisibleRangeChanged );
-}
-
-float
-ImageLayer::getMaxVisibleRange() const
-{
-    return options().maxVisibleRange().get();
 }
 
 bool

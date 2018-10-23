@@ -71,7 +71,7 @@ namespace
 SubstituteModelFilter::SubstituteModelFilter( const Style& style ) :
 _style                ( style ),
 _cluster              ( false ),
-_useDrawInstanced     ( false ),
+_useDrawInstanced     ( true ),
 _merge                ( true ),
 _normalScalingRequired( false ),
 _instanceCache        ( false )     // cache per object so MT not required
@@ -299,7 +299,7 @@ SubstituteModelFilter::process(const FeatureList&           features,
 
                     scaleMatrix = osg::Matrix::scale( scaleVec );
 
-                    if ( modelSymbol->heading().isSet() )
+                    if ( modelSymbol && modelSymbol->heading().isSet() )
                     {
                         float heading = input->eval(headingEx, &context);
                         rotationMatrix.makeRotate( osg::Quat(osg::DegreesToRadians(heading), osg::Vec3(0,0,1)) );

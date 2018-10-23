@@ -26,7 +26,6 @@
 #include <osgEarthSymbology/PointSymbol>
 #include <osgEarthSymbology/LineSymbol>
 #include <osgEarthSymbology/PolygonSymbol>
-#include <osgEarthSymbology/MarkerSymbol>
 #include <osgEarthSymbology/ModelSymbol>
 #include <osgEarthSymbology/ExtrusionSymbol>
 #include <osgEarthSymbology/AltitudeSymbol>
@@ -174,5 +173,6 @@ namespace osgEarth { namespace Symbology
 
 } } // namespace osgEarth::Symbology
 
+OSGEARTH_SPECIALIZE_CONFIG(osgEarth::Symbology::Style);
 
 #endif // OSGEARTHSYMBOLOGY_STYLE_H

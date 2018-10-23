@@ -136,7 +136,7 @@ namespace osgEarth
     };
 
 
-#define META_Layer(LIBRARY, TYPE, OPTIONS) \
+#define META_Layer(LIBRARY, TYPE, OPTIONS, SLUG) \
     private: \
         OPTIONS * _options; \
         OPTIONS   _optionsConcrete; \
@@ -144,8 +144,8 @@ namespace osgEarth
     public: \
         META_Object(LIBRARY, TYPE); \
         OPTIONS& options() { return *_options; } \
-        const OPTIONS& options() const { return *_options; }
-
+        const OPTIONS& options() const { return *_options; } \
+        virtual const char* getConfigKey() const { return #SLUG ; }
 
     /**
      * Base class for all Map layers.
@@ -153,7 +153,7 @@ namespace osgEarth
     class OSGEARTH_EXPORT Layer : public osg::Object
     {
     public:
-        META_Layer(osgEarth, Layer, LayerOptions);
+        META_Layer(osgEarth, Layer, LayerOptions, layer);
 
         /**
          * Constructs a map layer
@@ -195,7 +195,7 @@ namespace osgEarth
         const Status& getStatus() const { return _status; }
 
         /**
-         * @deprecated
+         * @deprecated (remove after 2.10)
          * Sequence controller if the layer has one.
          */
         virtual SequenceControl* getSequenceControl() { return 0L; }
@@ -324,6 +324,9 @@ namespace osgEarth
 
         virtual void setName(const std::string& name);
 
+        virtual void resizeGLObjectBuffers(unsigned maxSize);
+
+        virtual void releaseGLObjects(osg::State* state) const;
 
     public: // Loading a layer from a plugin
 

@@ -59,7 +59,7 @@ namespace
                 _first = false;
             }
 
-            const osg::BoundingBox bbox = Utils::getBoundingBox(geom);
+            const osg::BoundingBox bbox = geom->getBoundingBox();
             float radius = bbox.radius();
 
             osg::Vec3d centerView = bbox.center() * ri.getState()->getModelViewMatrix();
@@ -122,6 +122,16 @@ namespace
 //----------------------------------------------------------------------
 
 
+namespace
+{
+    struct StaticBBox : public osg::Drawable::ComputeBoundingBoxCallback
+    {
+        osg::BoundingBox _box;
+        StaticBBox(const osg::BoundingBox& box) : _box(box) { }
+        osg::BoundingBox computeBound(const osg::Drawable&) const { return _box; }
+    };
+}
+
 ConvertToDrawInstanced::ConvertToDrawInstanced(unsigned                numInstances,
                                                const osg::BoundingBox& bbox,
                                                bool                    optimize,
@@ -135,6 +145,7 @@ _tboUnit(defaultUnit)
 {
     setTraversalMode( TRAVERSE_ALL_CHILDREN );
     setNodeMaskOverride( ~0 );
+    _bboxComputer = new StaticBBox(bbox);
 }
 
 
@@ -151,7 +162,8 @@ ConvertToDrawInstanced::apply(osg::Drawable& drawable)
             geom->setUseVertexBufferObjects( true );
         }
 
-        geom->setInitialBound(_bbox);
+        geom->setComputeBoundingBoxCallback(_bboxComputer.get());
+        geom->dirtyBound();
 
         // convert to use DrawInstanced
         for( unsigned p=0; p<geom->getNumPrimitiveSets(); ++p )
@@ -215,7 +227,7 @@ DrawInstanced::install(osg::StateSet* stateset)
         return false;
 
     VirtualProgram* vp = VirtualProgram::getOrCreate(stateset);
-    
+    vp->setName("DrawInstanced");
     osgEarth::Shaders pkg;
     pkg.load( vp, pkg.InstancingVertex );
 
@@ -237,7 +249,6 @@ DrawInstanced::remove(osg::StateSet* stateset)
     pkg.unload( vp, pkg.InstancingVertex );
 }
 
-
 bool
 DrawInstanced::convertGraphToUseDrawInstanced( osg::Group* parent )
 {
@@ -248,6 +259,7 @@ DrawInstanced::convertGraphToUseDrawInstanced( osg::Group* parent )
     // the structure of the subgraph.
     const osg::BoundingSphere& bs = parent->getBound();
     parent->setInitialBound(bs);
+    //parent->setComputeBoundingSphereCallback(new StaticBound(bs));
     parent->dirtyBound();
 
     ModelInstanceMap models;

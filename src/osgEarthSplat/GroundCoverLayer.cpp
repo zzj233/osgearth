@@ -24,6 +24,7 @@
 #include "NoiseTextureFactory"
 #include <osgEarth/VirtualProgram>
 #include <osgEarth/Shadowing>
+#include <osgEarth/ClampableNode>
 #include <osgEarthFeatures/FeatureSource>
 #include <osgEarthFeatures/FeatureSourceLayer>
 #include <osgUtil/CullVisitor>
@@ -49,7 +50,6 @@ Config
 GroundCoverLayerOptions::getConfig() const
 {
     Config conf = PatchLayerOptions::getConfig();
-    conf.key() = "splat_groundcover";
     conf.set("land_cover_layer", _landCoverLayerName);
     conf.set("mask_layer", _maskLayerName);
     conf.set("lod", _lod);
@@ -62,17 +62,17 @@ GroundCoverLayerOptions::getConfig() const
             zones.add(zone);
     }
     if (!zones.empty())
-        conf.update(zones);
+        conf.set(zones);
     return conf;
 }
 
 void
 GroundCoverLayerOptions::fromConfig(const Config& conf)
 {
-    conf.getIfSet("land_cover_layer", _landCoverLayerName);
-    conf.getIfSet("mask_layer", _maskLayerName);
-    conf.getIfSet("lod", _lod);
-    conf.getIfSet("cast_shadows", _castShadows);
+    conf.get("land_cover_layer", _landCoverLayerName);
+    conf.get("mask_layer", _maskLayerName);
+    conf.get("lod", _lod);
+    conf.get("cast_shadows", _castShadows);
 
     const Config* zones = conf.child_ptr("zones");
     if (zones) {
@@ -103,8 +103,7 @@ namespace
             }
 
             // if this is a depth-pass camera (and not a shadow cam), reject it.
-            unsigned clearMask = camera->getClearMask();
-            bool isDepthCamera = ((clearMask & GL_COLOR_BUFFER_BIT) == 0u) && ((clearMask & GL_DEPTH_BUFFER_BIT) != 0u);
+            bool isDepthCamera = ClampableNode::isDepthCamera(camera);
             if (isDepthCamera)
                 return false;
 

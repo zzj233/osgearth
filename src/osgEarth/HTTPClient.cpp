@@ -334,7 +334,8 @@ HTTPResponse::getPartStream( unsigned int n ) const {
 std::string
 HTTPResponse::getPartAsString( unsigned int n ) const {
     std::string streamStr;
-    streamStr = _parts[n]->_stream.str();
+    if (n < _parts.size())
+        streamStr = _parts[n]->_stream.str();
     return streamStr;
 }
 
@@ -1293,6 +1294,13 @@ HTTPClient::doGet(const HTTPRequest&    request,
             << url << "\" (" << DateTime(filetime).asRFC1123() << ") t="
             << std::setprecision(4) << response.getDuration() << "s" << std::endl;
 
+        for(HTTPRequest::Parameters::const_iterator itr = request.getHeaders().begin();
+            itr != request.getHeaders().end(); 
+            ++itr)
+        {
+            OE_NOTICE << LC << "    Header: " << itr->first << " = " << itr->second << std::endl;
+        }
+
         {
             Threading::ScopedMutexLock lock(s_HTTP_DEBUG_mutex);
             s_HTTP_DEBUG_request_count++;
@@ -1359,6 +1367,9 @@ HTTPClient::doDownload(const std::string& url, const std::string& filename)
 
     if ( response.isOK() )
     {
+        if (response.getNumParts() < 1)
+            return false;
+
         unsigned int part_num = response.getNumParts() > 1? 1 : 0;
         std::istream& input_stream = response.getPartStream( part_num );
 
@@ -1414,7 +1425,7 @@ namespace
                 << ext << "; mime-type=" << response.getMimeType()
                 << ")" << std::endl;
 
-            if ( endsWith(response.getMimeType(), "xml", false) )
+            if ( endsWith(response.getMimeType(), "xml", false) && response.getNumParts() > 0 )
             {
                 OE_WARN << LC << "Content:\n" << response.getPartAsString(0) << "\n";
             }
@@ -1445,7 +1456,11 @@ HTTPClient::doReadImage(const HTTPRequest&    request,
 
         else
         {
-            osgDB::ReaderWriter::ReadResult rr = reader->readImage(response.getPartStream(0), options);
+            osgDB::ReaderWriter::ReadResult rr;
+
+            if (response.getNumParts() > 0)
+                rr = reader->readImage(response.getPartStream(0), options);
+
             if ( rr.validImage() )
             {
                 result = ReadResult(rr.takeImage());
@@ -1532,7 +1547,11 @@ HTTPClient::doReadNode(const HTTPRequest&    request,
 
         else
         {
-            osgDB::ReaderWriter::ReadResult rr = reader->readNode(response.getPartStream(0), options);
+            osgDB::ReaderWriter::ReadResult rr;
+            
+            if (response.getNumParts() > 0)
+                rr = reader->readNode(response.getPartStream(0), options);
+
             if ( rr.validNode() )
             {
                 result = ReadResult(rr.takeNode());
@@ -1612,7 +1631,11 @@ HTTPClient::doReadObject(const HTTPRequest&    request,
 
         else
         {
-            osgDB::ReaderWriter::ReadResult rr = reader->readObject(response.getPartStream(0), options);
+            osgDB::ReaderWriter::ReadResult rr;
+            
+            if (response.getNumParts() > 0 )
+                rr = reader->readObject(response.getPartStream(0), options);
+
             if ( rr.validObject() )
             {
                 result = ReadResult(rr.takeObject());
@@ -1681,7 +1704,7 @@ HTTPClient::doReadString(const HTTPRequest&    request,
     ReadResult result;
 
     HTTPResponse response = this->doGet( request, options, callback );
-    if ( response.isOK() )
+    if ( response.isOK() && response.getNumParts() > 0 )
     {
         result = ReadResult( new StringObject(response.getPartAsString(0)) );
     }

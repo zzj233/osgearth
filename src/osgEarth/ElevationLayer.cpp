@@ -74,26 +74,20 @@ Config
 ElevationLayerOptions::getConfig() const
 {
     Config conf = TerrainLayerOptions::getConfig();
-    conf.key() = "elevation";
-
     conf.set("offset", _offset);
     conf.set("nodata_policy", "default",     _noDataPolicy, NODATA_INTERPOLATE );
     conf.set("nodata_policy", "interpolate", _noDataPolicy, NODATA_INTERPOLATE );
     conf.set("nodata_policy", "msl",         _noDataPolicy, NODATA_MSL );
-
-    //if (driver().isSet())
-    //    conf.set("driver", driver()->getDriver());
-
     return conf;
 }
 
 void
 ElevationLayerOptions::fromConfig( const Config& conf )
 {
-    conf.getIfSet("offset", _offset );
-    conf.getIfSet("nodata_policy", "default",     _noDataPolicy, NODATA_INTERPOLATE );
-    conf.getIfSet("nodata_policy", "interpolate", _noDataPolicy, NODATA_INTERPOLATE );
-    conf.getIfSet("nodata_policy", "msl",         _noDataPolicy, NODATA_MSL );
+    conf.get("offset", _offset );
+    conf.get("nodata_policy", "default",     _noDataPolicy, NODATA_INTERPOLATE );
+    conf.get("nodata_policy", "interpolate", _noDataPolicy, NODATA_INTERPOLATE );
+    conf.get("nodata_policy", "msl",         _noDataPolicy, NODATA_MSL );
 }
 
 void
@@ -656,14 +650,7 @@ ElevationLayer::createHeightField(const TileKey&    key,
         return GeoHeightField::INVALID;
     }
 
-    // write to mem cache if needed:
-    if ( result.valid() && !fromMemCache && _memCache.valid() )
-    {
-        CacheBin* bin = _memCache->getOrCreateDefaultBin();
-        bin->write(cacheKey, result.getHeightField(), 0L);
-    }
-
-    // post-processing:
+    // post-processing -- must be done before caching because it may alter the heightfield data
     if ( result.valid() )
     {
         if ( options().noDataPolicy() == NODATA_MSL )
@@ -683,11 +670,18 @@ ElevationLayer::createHeightField(const TileKey&    key,
             }
 
             HeightFieldUtils::resolveInvalidHeights(
-                result.getHeightField(),
+                hf.get(),
                 result.getExtent(),
                 NO_DATA_VALUE,
                 geoid );
         }
+    }
+
+    // write to mem cache if needed:
+    if ( result.valid() && !fromMemCache && _memCache.valid() )
+    {
+        CacheBin* bin = _memCache->getOrCreateDefaultBin();
+        bin->write(cacheKey, result.getHeightField(), 0L);
     }
 
     return result;
@@ -995,7 +989,7 @@ ElevationLayerVector::populateHeightFieldAndNormalMap(osg::HeightField*      hf,
 
     // If we only have a single contender layer, and the tile is the same size as the requested 
     // heightfield then we just use it directly and avoid having to resample it
-    if (contenders.size() == 1)
+    if (contenders.size() == 1 && offsets.empty())
     {
         ElevationLayer* layer = contenders[0].layer.get();
         TileKey& contenderKey = contenders[0].key;

@@ -221,6 +221,12 @@ LODBlending::onInstall(TerrainEngineNode* engine)
 {
     if ( engine )
     {
+        if (engine->getName() == "osgEarth.RexTerrainEngineNode")
+        {
+            OE_WARN << LC << "LODBlending extension will be disabled; terrain engine supports blending natively" << std::endl;
+            return;
+        }
+
         // need the parent textures for blending.
         engine->requireParentTextures();
 
@@ -287,7 +293,7 @@ class LODBlendingExtension : public Extension,
                              public LODBlendingOptions
 {
 public:
-    META_Object(osgearth_ext_lodblending, LODBlendingExtension);
+    META_OE_Extension(osgEarth, LODBlendingExtension, lod_blending);
 
     // CTORs
     LODBlendingExtension() { }
@@ -323,10 +329,6 @@ public: // ExtensionInterface<MapNode>
         }
         return true;
     }
-
-
-protected: // Object
-    LODBlendingExtension(const LODBlendingExtension& rhs, const osg::CopyOp& op) { }
 
 private:
     osg::ref_ptr<LODBlending> _effect;

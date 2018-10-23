@@ -27,6 +27,7 @@
 #include <osgEarth/ElevationLayer>
 #include <osgEarth/ModelLayer>
 #include <osgEarth/GeoTransform>
+#include <osgEarth/CompositeTileSource>
 
 #include <osgEarthUtil/EarthManipulator>
 #include <osgEarthUtil/ExampleResources>
@@ -37,12 +38,28 @@
 #include <osgEarthDrivers/gdal/GDALOptions>
 #include <osgEarthDrivers/osg/OSGOptions>
 #include <osgEarthDrivers/xyz/XYZOptions>
+#include <osgEarthDrivers/feature_ogr/OGRFeatureOptions>
+
+#include <osgEarthFeatures/FeatureMaskLayer>
 
 #include <osg/PositionAttitudeTransform>
+#include <osgDB/WriteFile>
 
 using namespace osgEarth;
 using namespace osgEarth::Drivers;
 using namespace osgEarth::Util;
+using namespace osgEarth::Features;
+
+int
+usage(int argc, char** argv)
+{
+    OE_NOTICE 
+        << "\n" << argv[0]
+        << "\n    [--out outFile] : write map node to outFile before exit"
+        << std::endl;
+
+    return 0;
+}
 
 /**
  * How to create a simple osgEarth map and display it.
@@ -51,6 +68,8 @@ int
 main(int argc, char** argv)
 {
     osg::ArgumentParser arguments(&argc,argv);
+    if (arguments.read("--help"))
+        return usage(argc, argv);
 
     // create the empty map.
     Map* map = new Map();
@@ -97,6 +116,35 @@ main(int argc, char** argv)
     osg.profile()->bounds()->set(-90.0, 10.0, -80.0, 15.0);
     map->addLayer(new ImageLayer("Simple image", osg));
 
+    // create a composite image layer that combines two other sources:
+    GDALOptions c1;
+    c1.url() = "../data/boston-inset-wgs84.tif";
+
+    GDALOptions c2;
+    c2.url() = "../data/nyc-inset-wgs84.tif";
+
+    CompositeTileSourceOptions composite;
+    composite.add(ImageLayerOptions(c1));
+    composite.add(ImageLayerOptions(c2));
+
+    ImageLayerOptions compLayerOptions("My Composite Layer", composite);
+    map->addLayer(new ImageLayer(compLayerOptions));
+
+    // mask layer
+    OGRFeatureOptions maskOptions;
+    maskOptions.geometry() = new Polygon();
+    maskOptions.geometry()->push_back(osg::Vec3d(-111.0466, 42.0015, 0));
+    maskOptions.geometry()->push_back(osg::Vec3d(-111.0467, 40.9979, 0));
+    maskOptions.geometry()->push_back(osg::Vec3d(-109.0501, 41.0007, 0));
+    maskOptions.geometry()->push_back(osg::Vec3d(-109.0452, 36.9991, 0));
+    maskOptions.geometry()->push_back(osg::Vec3d(-114.0506, 37.0004, 0));
+    maskOptions.geometry()->push_back(osg::Vec3d(-114.0417, 41.9937, 0));
+    maskOptions.profile() = ProfileOptions("global-geodetic");
+    FeatureMaskLayerOptions maskLayerOptions;
+    maskLayerOptions.name() = "Mask layer";
+    maskLayerOptions.featureSource() = maskOptions;
+    map->addLayer(new FeatureMaskLayer(maskLayerOptions));
+
     // put a model on the map atop Pike's Peak, Colorado, USA
     osg::ref_ptr<osg::Node> model = osgDB::readRefNodeFile("cow.osgt.(0,0,3).trans.osgearth_shadergen");
     if (model.valid())
@@ -124,5 +172,11 @@ main(int argc, char** argv)
     // add some stock OSG handlers:
     MapNodeHelper().configureView(&viewer);
 
-    return viewer.run();
+    int r = viewer.run();
+
+    std::string outFile;
+    if (arguments.read("--out", outFile))
+        osgDB::writeNodeFile(*node, outFile);
+
+    return r;
 }

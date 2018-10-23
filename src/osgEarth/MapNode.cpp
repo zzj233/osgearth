@@ -349,28 +349,6 @@ MapNode::init()
     if ( _map->isGeocentric() )
     {
         stateset->setDefine("OE_IS_GEOCENTRIC");
-
-#if 0 // remove since they are currently unused
-        OE_INFO << LC << "Adding ellipsoid uniforms.\n";
-
-        // for a geocentric map, use an ellipsoid unit-frame transform and its inverse:
-        if (_map->getSRS() != NULL && _map->getSRS()->getEllipsoid() != NULL)
-        {
-            osg::Vec3d ellipFrameInverse(
-                _map->getSRS()->getEllipsoid()->getRadiusEquator(),
-                _map->getSRS()->getEllipsoid()->getRadiusEquator(),
-                _map->getSRS()->getEllipsoid()->getRadiusPolar());
-            stateset->addUniform( new osg::Uniform("oe_ellipsoidFrameInverse", osg::Vec3f(ellipFrameInverse)) );
-
-            osg::Vec3d ellipFrame = osg::componentDivide(osg::Vec3d(1.0,1.0,1.0), ellipFrameInverse);
-            stateset->addUniform( new osg::Uniform("oe_ellipsoidFrame", osg::Vec3f(ellipFrame)) );
-        }
-        else
-        {
-            stateset->addUniform( new osg::Uniform("oe_ellipsoidFrameInverse", osg::Vec3f()) );
-            stateset->addUniform( new osg::Uniform("oe_ellipsoidFrame", osg::Vec3f()) );
-        }
-#endif
     }
 
     // install a default material for everything in the map
@@ -446,10 +424,8 @@ MapNode::getConfig() const
     {
         Extension* e = i->get();
         Config conf = e->getConfigOptions().getConfig();
-        if ( !conf.key().empty() )
-        {
-            mapConf.add( conf );
-        }
+        conf.key() = e->getConfigKey();
+        mapConf.add( conf );
     }
 
     Config ext = externalConfig();
@@ -743,9 +719,7 @@ MapNode::resizeGLObjectBuffers(unsigned maxSize)
     getMap()->getLayers(layers);
     for (LayerVector::const_iterator i = layers.begin(); i != layers.end(); ++i)
     {
-        if ((*i)->getStateSet()) {
-            (*i)->getStateSet()->resizeGLObjectBuffers(maxSize);
-        }
+        i->get()->resizeGLObjectBuffers(maxSize);
     }
 }
 
@@ -758,10 +732,16 @@ MapNode::releaseGLObjects(osg::State* state) const
     getMap()->getLayers(layers);
     for (LayerVector::const_iterator i = layers.begin(); i != layers.end(); ++i)
     {
-        if ((*i)->getStateSet()) {
-            (*i)->getStateSet()->releaseGLObjects(state);
-        }
+        i->get()->releaseGLObjects(state);
     }
+
+    // osg::Node doesn't release nested callbacks, oops
+    for(const osg::Callback* cc = getCullCallback(); cc; cc = cc->getNestedCallback())
+        cc->releaseGLObjects(state);
+    for(const osg::Callback* uc = getUpdateCallback(); uc; uc = uc->getNestedCallback())
+        uc->releaseGLObjects(state);
+    for(const osg::Callback* ec = getEventCallback(); ec; ec = ec->getNestedCallback())
+        ec->releaseGLObjects(state);
 }
 
 DrapingManager*

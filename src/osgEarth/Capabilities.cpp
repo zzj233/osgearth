@@ -26,6 +26,13 @@ using namespace osgEarth;
 
 #define LC "[Capabilities] "
 
+#ifndef GL_CONTEXT_PROFILE_MASK
+#define GL_CONTEXT_PROFILE_MASK           0x9126
+#endif
+#ifndef GL_CONTEXT_CORE_PROFILE_BIT
+#define GL_CONTEXT_CORE_PROFILE_BIT       0x00000001
+#endif
+
 // ---------------------------------------------------------------------------
 // A custom P-Buffer graphics context that we will use to query for OpenGL 
 // extension and hardware support. (Adapted from osgconv in OpenSceneGraph)
@@ -157,12 +164,21 @@ _isCoreProfile          ( true )
 #endif
 
     // create a graphics context so we can query OpenGL support:
+    osg::GraphicsContext* gc = NULL;
+    unsigned int id = 0;
+#ifndef __ANDROID__
     MyGraphicsContext mgc;
-
     if ( mgc.valid() )
     {
-        osg::GraphicsContext* gc = mgc._gc.get();
-        unsigned int id = gc->getState()->getContextID();
+        gc = mgc._gc.get();
+        id = gc->getState()->getContextID();
+    }
+#endif
+
+#ifndef __ANDROID__
+    if ( gc != NULL )
+#endif
+    {
         const osg::GL2Extensions* GL2 = osg::GL2Extensions::Get( id, true );
 
         OE_INFO << LC << "osgEarth Version: " << osgEarthGetVersion() << std::endl;
@@ -188,8 +204,17 @@ _isCoreProfile          ( true )
         _version = std::string( reinterpret_cast<const char*>(glGetString(GL_VERSION)) );
         OE_INFO << LC << "  Version = " << _version << std::endl;
 
-        // Core profile requires OSG 3.2, and the compatibility extension not being present
-        _isCoreProfile = (GL2->glVersion >= 3.2f && !osg::isGLExtensionSupported(id, "GL_ARB_compatibility"));
+        // Detect core profile by investigating GL_CONTEXT_PROFILE_MASK
+        if ( GL2->glVersion < 3.2f )
+        {
+            _isCoreProfile = false;
+        }
+        else
+        {
+            GLint profileMask = 0;
+            glGetIntegerv(GL_CONTEXT_PROFILE_MASK, &profileMask);
+            _isCoreProfile = ((profileMask & GL_CONTEXT_CORE_PROFILE_BIT) != 0);
+        }
         OE_INFO << LC << "  Core Profile = " << SAYBOOL(_isCoreProfile) << std::endl;
 
 #if !defined(OSG_GLES2_AVAILABLE) && !defined(OSG_GLES3_AVAILABLE)
@@ -342,22 +367,11 @@ _isCoreProfile          ( true )
         // BUT unfortunately, they dont' seem to work too well with shaders. Colors
         // change randomly, etc. Might work OK for textured geometry but not for 
         // untextured. TODO: investigate.
-#if 1
         _preferDLforStaticGeom = false;
         if ( ::getenv("OSGEARTH_TRY_DISPLAY_LISTS") )
         {
             _preferDLforStaticGeom = true;
         }
-#else
-        if ( ::getenv("OSGEARTH_ALWAYS_USE_VBOS") )
-        {
-            _preferDLforStaticGeom = false;
-        }
-        else
-        {
-            _preferDLforStaticGeom = isNVIDIA;
-        }
-#endif
 
         //OE_INFO << LC << "  prefer DL for static geom = " << SAYBOOL(_preferDLforStaticGeom) << std::endl;
 
@@ -365,15 +379,6 @@ _isCoreProfile          ( true )
         bool isATI = _vendor.find("ATI ") == 0;
 
         _supportsMipmappedTextureUpdates = isATI && enableATIworkarounds ? false : true;
-        //OE_INFO << LC << "  Mipmapped texture updates = " << SAYBOOL(_supportsMipmappedTextureUpdates) << std::endl;
-
-#if 0
-        // Intel workarounds:
-        bool isIntel = 
-            _vendor.find("Intel ")   != std::string::npos ||
-            _vendor.find("Intel(R)") != std::string::npos ||
-            _vendor.compare("Intel") == 0;
-#endif
 
         _maxFastTextureSize = _maxTextureSize;
 

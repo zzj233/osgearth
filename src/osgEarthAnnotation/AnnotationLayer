@@ -39,19 +39,18 @@ namespace osgEarth { namespace Annotation
     public:
         virtual Config getConfig() const {
             Config conf = VisibleLayerOptions::getConfig();
-            conf.key() = "annotations";
             return conf;
-        }
-
-        virtual void fromConfig(const Config& conf) {
-            //nop
         }
 
     protected:
 
-        void mergeConfig(const Config& conf) {
+        virtual void mergeConfig(const Config& conf) {
             VisibleLayerOptions::mergeConfig(conf);
             fromConfig(conf);
+        }
+
+        void fromConfig(const Config& conf) {
+            //nop
         }
     };
 
@@ -64,7 +63,7 @@ namespace osgEarth { namespace Annotation
     class OSGEARTHANNO_EXPORT AnnotationLayer : public VisibleLayer
     {
     public:
-        META_Layer(osgEarthAnnotation, AnnotationLayer, AnnotationLayerOptions);
+        META_Layer(osgEarthAnnotation, AnnotationLayer, AnnotationLayerOptions, annotations);
 
         //! Construct a default layer
         AnnotationLayer();

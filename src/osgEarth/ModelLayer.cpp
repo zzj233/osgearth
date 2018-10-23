@@ -64,7 +64,6 @@ Config
 ModelLayerOptions::getConfig() const
 {
     Config conf = VisibleLayerOptions::getConfig();
-    conf.key() = "model";
 
     conf.set( "name",           _name );
     conf.set( "lighting",       _lighting );
@@ -83,8 +82,8 @@ ModelLayerOptions::getConfig() const
 void
 ModelLayerOptions::fromConfig( const Config& conf )
 {
-    conf.getIfSet( "lighting",       _lighting );
-    conf.getIfSet( "mask_min_level", _maskMinLevel );
+    conf.get( "lighting",       _lighting );
+    conf.get( "mask_min_level", _maskMinLevel );
 
     if ( conf.hasValue("driver") )
         driver() = ModelSourceOptions(conf);
@@ -157,6 +156,7 @@ void
 ModelLayer::init()
 {
     VisibleLayer::init();
+    installDefaultOpacityShader();
     _root = new osg::Group();
     _root->setName(getName());
 }
@@ -287,6 +287,17 @@ ModelLayer::addedToMap(const Map* map)
 
             _root->addChild(node.get());
         }
+    }
+}
+
+void
+ModelLayer::removedFromMap(const Map* map)
+{
+    // dispose of the scene graph.
+    while (_root->getNumChildren() > 0)
+    {
+        getSceneGraphCallbacks()->fireRemoveNode(_root->getChild(0));
+        _root->removeChildren(0, 1);
     }
 }
 
