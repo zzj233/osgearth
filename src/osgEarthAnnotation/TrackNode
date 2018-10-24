@@ -167,6 +167,9 @@ namespace osgEarth { namespace Annotation
         NamedDrawables _namedDrawables;
 
         void compile();
+
+        static const char* iconVS;
+        static const char* iconFS;
     };
 
 } } // namespace osgEarth::Annotation

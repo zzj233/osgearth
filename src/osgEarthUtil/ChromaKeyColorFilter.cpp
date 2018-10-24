@@ -20,31 +20,12 @@
 #include <osgEarth/VirtualProgram>
 #include <osgEarth/StringUtils>
 #include <osgEarth/ThreadingUtils>
+#include <osgEarth/Registry>
 #include <osg/Program>
 #include <OpenThreads/Atomic>
 
 using namespace osgEarth;
 using namespace osgEarth::Util;
-
-namespace
-{
-    static OpenThreads::Atomic s_uniformNameGen;
-
-    static const char* s_localShaderSource =
-
-        "#version 110\n"
-
-        "uniform vec3  __COLOR_UNIFORM_NAME__;\n"
-        "uniform float __DISTANCE_UNIFORM_NAME__;\n"
-
-        "void __ENTRY_POINT__(inout vec4 color)\n"
-        "{ \n"
-        "    float dist = distance(color.rgb, __COLOR_UNIFORM_NAME__); \n"
-        "    if (dist <= __DISTANCE_UNIFORM_NAME__) color.a = 0.0;\n"
-        // feathering:
-        //"    if (dist <= __DISTANCE_UNIFORM_NAME__) color.a = (dist/__DISTANCE_UNIFORM_NAME__); \n" 
-        "} \n";
-}
 
 
 //---------------------------------------------------------------------------
@@ -64,7 +45,7 @@ void ChromaKeyColorFilter::init()
 {
     // Generate a unique name for this filter's uniform. This is necessary
     // so that each layer can have a unique uniform and entry point.
-    _instanceId = (++s_uniformNameGen) - 1;
+    _instanceId = osgEarth::Registry::instance()->createUID();
     _color = new osg::Uniform(osg::Uniform::FLOAT_VEC3, (osgEarth::Stringify() << COLOR_UNIFORM_PREFIX << _instanceId));    
     //Default to black
     _color->set( osg::Vec3(0.0f, 0.0f, 0.0f) );
@@ -112,6 +93,21 @@ void ChromaKeyColorFilter::install(osg::StateSet* stateSet) const
     osgEarth::VirtualProgram* vp = dynamic_cast<osgEarth::VirtualProgram*>(stateSet->getAttribute(VirtualProgram::SA_TYPE));
     if (vp)
     {
+        const char* s_localShaderSource =
+
+            "#version 110\n"
+
+            "uniform vec3  __COLOR_UNIFORM_NAME__;\n"
+            "uniform float __DISTANCE_UNIFORM_NAME__;\n"
+
+            "void __ENTRY_POINT__(inout vec4 color)\n"
+            "{ \n"
+            "    float dist = distance(color.rgb, __COLOR_UNIFORM_NAME__); \n"
+            "    if (dist <= __DISTANCE_UNIFORM_NAME__) color.a = 0.0;\n"
+            // feathering:
+            //"    if (dist <= __DISTANCE_UNIFORM_NAME__) color.a = (dist/__DISTANCE_UNIFORM_NAME__); \n" 
+            "} \n";
+
         // build the local shader (unique per instance). We will
         // use a template with search and replace for this one.
         std::string entryPoint = osgEarth::Stringify() << FUNCTION_PREFIX << _instanceId;

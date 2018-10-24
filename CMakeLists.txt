@@ -63,6 +63,15 @@ ENDIF(THIRD_PARTY_DIR)
 # Maybe this can be used override existing behavior if needed?
 SET(CMAKE_MODULE_PATH "${OSGEARTH_SOURCE_DIR}/CMakeModules;${CMAKE_MODULE_PATH}")
 
+# COTIRE speeds up compilation.
+# https://github.com/sakra/cotire
+OPTION(BUILD_WITH_COTIRE "Speed up compilation with cotire" ON)
+IF(BUILD_WITH_COTIRE)
+    # controls the virtual memory allocation for precompiled headers (/Zm)
+    SET(COTIRE_PCH_MEMORY_SCALING_FACTOR 256)
+    INCLUDE(cotire)
+ENDIF(BUILD_WITH_COTIRE)
+
 # Attempt to detect the GIT revision number.
 OPTION(OSGEARTH_EMBED_GIT_SHA "Embeds the GIT SHA in the version code" OFF)
 IF (OSGEARTH_EMBED_GIT_SHA)

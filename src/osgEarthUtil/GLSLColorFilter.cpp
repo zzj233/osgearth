@@ -25,24 +25,12 @@
 #include <osgEarth/VirtualProgram>
 #include <osgEarth/StringUtils>
 #include <osgEarth/ThreadingUtils>
+#include <osgEarth/Registry>
 #include <osg/Program>
 #include <OpenThreads/Atomic>
 
 using namespace osgEarth;
 using namespace osgEarth::Util;
-
-namespace
-{
-    static OpenThreads::Atomic s_uniformNameGen;
-
-    static const char* s_localShaderSource =
-        "#version " GLSL_VERSION_STR "\n"
-        GLSL_DEFAULT_PRECISION_FLOAT "\n"
-        "void __ENTRY_POINT__(inout vec4 color)\n"
-        "{\n"
-        "__CODE__ \n"
-        "} \n";
-}
 
 //---------------------------------------------------------------------------
 
@@ -58,7 +46,7 @@ GLSLColorFilter::GLSLColorFilter()
 void 
 GLSLColorFilter::init()
 {
-    _instanceId = (++s_uniformNameGen) - 1;
+    _instanceId = osgEarth::Registry::instance()->createUID();
     _type.init( osg::Shader::FRAGMENT );
     _functionName.init("");
 }
@@ -85,6 +73,14 @@ GLSLColorFilter::install(osg::StateSet* stateSet) const
         }
         else
         {
+            const char* s_localShaderSource =
+                "#version " GLSL_VERSION_STR "\n"
+                GLSL_DEFAULT_PRECISION_FLOAT "\n"
+                "void __ENTRY_POINT__(inout vec4 color)\n"
+                "{\n"
+                "__CODE__ \n"
+                "} \n";
+
             // build the local shader (unique per instance). We will
             // use a template with search and replace for this one.
             std::string entryPoint = getEntryPointFunctionName();

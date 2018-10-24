@@ -25,25 +25,12 @@
 #include <osgEarth/VirtualProgram>
 #include <osgEarth/StringUtils>
 #include <osgEarth/ThreadingUtils>
+#include <osgEarth/Registry>
 #include <osg/Program>
 #include <OpenThreads/Atomic>
 
 using namespace osgEarth;
 using namespace osgEarth::Util;
-
-namespace
-{
-    static OpenThreads::Atomic s_uniformNameGen;
-
-    static const char* s_localShaderSource =
-        "#version 110\n"
-        "uniform vec3 __UNIFORM_NAME__;\n"
-
-        "void __ENTRY_POINT__(inout vec4 color)\n"
-        "{\n"
-        "    color.rgb = clamp(color.rgb + __UNIFORM_NAME__.rgb, 0.0, 1.0); \n"
-        "} \n";
-}
 
 //---------------------------------------------------------------------------
 
@@ -61,7 +48,7 @@ void RGBColorFilter::init()
 {
     // Generate a unique name for this filter's uniform. This is necessary
     // so that each layer can have a unique uniform and entry point.
-    m_instanceId = (++s_uniformNameGen) - 1;
+    m_instanceId = osgEarth::Registry::instance()->createUID();
     m_rgb = new osg::Uniform(osg::Uniform::FLOAT_VEC3, (osgEarth::Stringify() << UNIFORM_PREFIX << m_instanceId));
     m_rgb->set(osg::Vec3f(0.0f, 0.0f, 0.0f));
 }
@@ -91,6 +78,15 @@ void RGBColorFilter::install(osg::StateSet* stateSet) const
     osgEarth::VirtualProgram* vp = dynamic_cast<osgEarth::VirtualProgram*>(stateSet->getAttribute(VirtualProgram::SA_TYPE));
     if (vp)
     {
+        const char* s_localShaderSource =
+            "#version 110\n"
+            "uniform vec3 __UNIFORM_NAME__;\n"
+
+            "void __ENTRY_POINT__(inout vec4 color)\n"
+            "{\n"
+            "    color.rgb = clamp(color.rgb + __UNIFORM_NAME__.rgb, 0.0, 1.0); \n"
+            "} \n";
+
         // build the local shader (unique per instance). We will
         // use a template with search and replace for this one.
         std::string entryPoint = osgEarth::Stringify() << FUNCTION_PREFIX << m_instanceId;

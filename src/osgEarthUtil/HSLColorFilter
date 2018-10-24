@@ -58,6 +58,8 @@ namespace osgEarth { namespace Util
         osg::ref_ptr<osg::Uniform> _hsl;
 
         void init();
+
+        static osg::ref_ptr<osg::Shader> s_commonShader;
     };
 
 } } // namespace osgEarth::Util

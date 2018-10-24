@@ -39,29 +39,25 @@ using namespace osgEarth::Symbology;
 
 //------------------------------------------------------------------------
 
-namespace
-{
-    const char* iconVS =
-        "#version " GLSL_VERSION_STR "\n"
-        "out vec2 oe_TrackNode_texcoord; \n"
-        "void oe_TrackNode_icon_VS(inout vec4 vertex) { \n"
-        "    oe_TrackNode_texcoord = gl_MultiTexCoord0.st; \n"
-        "} \n";
+const char* TrackNode::iconVS =
+    "#version " GLSL_VERSION_STR "\n"
+    "out vec2 oe_TrackNode_texcoord; \n"
+    "void oe_TrackNode_icon_VS(inout vec4 vertex) { \n"
+    "    oe_TrackNode_texcoord = gl_MultiTexCoord0.st; \n"
+    "} \n";
 
-    const char* iconFS =
-        "#version " GLSL_VERSION_STR "\n"
-        "in vec2 oe_TrackNode_texcoord; \n"
-        "uniform sampler2D oe_TrackNode_tex; \n"
-        "void oe_TrackNode_icon_FS(inout vec4 color) { \n"
-        "    color = texture(oe_TrackNode_tex, oe_TrackNode_texcoord); \n"
-        "} \n";
-}
-
-//------------------------------------------------------------------------
+const char* TrackNode::iconFS =
+    "#version " GLSL_VERSION_STR "\n"
+    "in vec2 oe_TrackNode_texcoord; \n"
+    "uniform sampler2D oe_TrackNode_tex; \n"
+    "void oe_TrackNode_icon_FS(inout vec4 color) { \n"
+    "    color = texture(oe_TrackNode_tex, oe_TrackNode_texcoord); \n"
+    "} \n";
 
 osg::observer_ptr<osg::StateSet> TrackNode::s_geodeStateSet;
 osg::observer_ptr<osg::StateSet> TrackNode::s_imageStateSet;
 
+//------------------------------------------------------------------------
 
 TrackNode::TrackNode(const GeoPoint&             position,
                      osg::Image*                 image,

@@ -2053,7 +2053,7 @@ HBox::draw( const ControlContext& cx )
 
 // ---------------------------------------------------------------------------
 
-Grid::Grid() :
+osgEarth::Util::Controls::Grid::Grid() :
 Container(),
 _maxCols(0)
 {
@@ -2061,7 +2061,7 @@ _maxCols(0)
     setChildVertAlign( ALIGN_CENTER );
 }
 
-Grid::Grid( const Alignment& halign, const Alignment& valign, const Gutter& padding, float spacing ) :
+osgEarth::Util::Controls::Grid::Grid( const Alignment& halign, const Alignment& valign, const Gutter& padding, float spacing ) :
 Container( halign, valign, padding, spacing ),
 _maxCols(0)
 {
@@ -2069,7 +2069,7 @@ _maxCols(0)
 }
 
 void
-Grid::getChildren(std::vector<Control*>& out)
+osgEarth::Util::Controls::Grid::getChildren(std::vector<Control*>& out)
 {
     for(unsigned i=1; i<getNumChildren(); ++i )
     {
@@ -2086,13 +2086,13 @@ Grid::getChildren(std::vector<Control*>& out)
 }
 
 unsigned
-Grid::getNumRows() const
+osgEarth::Util::Controls::Grid::getNumRows() const
 {
     return getNumChildren()-1;
 }
 
 unsigned
-Grid::getNumColumns() const
+osgEarth::Util::Controls::Grid::getNumColumns() const
 {
     if ( getNumRows() == 0 )
         return 0;
@@ -2101,13 +2101,13 @@ Grid::getNumColumns() const
 }
 
 osg::Group*
-Grid::getRow(unsigned index)
+osgEarth::Util::Controls::Grid::getRow(unsigned index)
 {
     return getNumChildren() >= 2+index ? getChild(1+index)->asGroup() : 0L;
 }
 
 Control*
-Grid::setControlImpl( int col, int row, Control* child )
+osgEarth::Util::Controls::Grid::setControlImpl( int col, int row, Control* child )
 {
     if ( child )
     {
@@ -2123,7 +2123,7 @@ Grid::setControlImpl( int col, int row, Control* child )
 }
 
 Control*
-Grid::getControl(int col, int row)
+osgEarth::Util::Controls::Grid::getControl(int col, int row)
 {
     if ( row < (int)getNumChildren()+1 )
     {
@@ -2137,7 +2137,7 @@ Grid::getControl(int col, int row)
 }
 
 void
-Grid::expandToInclude( int col, int row )
+osgEarth::Util::Controls::Grid::expandToInclude( int col, int row )
 {
     // ensure all rows have sufficient columns:
     if ( col+1 > (int)_maxCols )
@@ -2165,14 +2165,14 @@ Grid::expandToInclude( int col, int row )
 }
 
 Control*
-Grid::addControlImpl( Control* control, int index )
+osgEarth::Util::Controls::Grid::addControlImpl( Control* control, int index )
 {
     // creates a new row and puts the control in its first column (index is ignored)
     return setControlImpl( 0, getNumRows(), control );
 }
 
 void
-Grid::addControls( const ControlVector& controls )
+osgEarth::Util::Controls::Grid::addControls( const ControlVector& controls )
 {
     unsigned row = getNumRows();
     unsigned col = 0;
@@ -2186,14 +2186,14 @@ Grid::addControls( const ControlVector& controls )
 }
 
 void
-Grid::clearControls()
+osgEarth::Util::Controls::Grid::clearControls()
 {
     removeChildren(1, getNumChildren()-1);
     dirty();
 }
 
 void
-Grid::calcSize( const ControlContext& cx, osg::Vec2f& out_size )
+osgEarth::Util::Controls::Grid::calcSize( const ControlContext& cx, osg::Vec2f& out_size )
 {
     
         _renderSize.set( 0, 0 );
@@ -2238,7 +2238,7 @@ Grid::calcSize( const ControlContext& cx, osg::Vec2f& out_size )
 }
 
 void
-Grid::calcFill(const ControlContext& cx)
+osgEarth::Util::Controls::Grid::calcFill(const ControlContext& cx)
 {
     Container::calcFill( cx );
 
@@ -2263,7 +2263,7 @@ Grid::calcFill(const ControlContext& cx)
 }
 
 void
-Grid::calcPos( const ControlContext& cx, const osg::Vec2f& cursor, const osg::Vec2f& parentSize )
+osgEarth::Util::Controls::Grid::calcPos( const ControlContext& cx, const osg::Vec2f& cursor, const osg::Vec2f& parentSize )
 {
     Container::calcPos( cx, cursor, parentSize );
 
@@ -2294,7 +2294,7 @@ Grid::calcPos( const ControlContext& cx, const osg::Vec2f& cursor, const osg::Ve
 
 
 void
-Grid::draw( const ControlContext& cx )
+osgEarth::Util::Controls::Grid::draw( const ControlContext& cx )
 {
     
         Container::draw( cx );
