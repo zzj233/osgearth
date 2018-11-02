@@ -850,6 +850,7 @@ TerrainLayer::applyProfileOverrides()
     }
 }
 
+#if 0
 bool
 TerrainLayer::mayHaveDataInExtent(const GeoExtent& ex) const
 {
@@ -893,6 +894,7 @@ TerrainLayer::mayHaveDataInExtent(const GeoExtent& ex) const
     // definite no.
     return false;
 }
+#endif
 
 bool
 TerrainLayer::isKeyInLegalRange(const TileKey& key) const
@@ -1010,6 +1012,12 @@ TerrainLayer::getDataExtents() const
     {
         return _dataExtents;
     }
+}
+
+DataExtentList&
+TerrainLayer::dataExtents()
+{
+    return const_cast<DataExtentList&>(getDataExtents());
 }
 
 void
@@ -1165,7 +1173,7 @@ TerrainLayer::getBestAvailableTileKey(const TileKey& key) const
 
     if ( intersects )
     {
-        return key.createAncestorKey(std::min(key.getLOD(), std::min(highestLOD, MDL)));
+        return key.createAncestorKey(osg::minimum(key.getLOD(), osg::minimum(highestLOD, MDL)));
     }
 
     return TileKey::INVALID;

@@ -22,6 +22,7 @@
 #include <Version.h>
 #include <osg/MatrixTransform>
 #include <osg/FrameBufferObject>
+#include <osg/Depth>
 
 #include <osgEarth/SpatialReference>
 #include <osgEarth/VirtualProgram>
@@ -136,7 +137,7 @@ TritonDrawable::drawImplementation(osg::RenderInfo& renderInfo) const
     if ( adapters.empty() )
     {
         OE_INFO << LC << "Initializing Triton program adapters" << std::endl;
-        const char* prefix = NULL; //"oe_"; // because, don't forget osg_*
+        const char* prefix = "oe_"; // because, don't forget osg_*
         adapters.push_back( new osgEarth::NativeProgramAdapter(state, getOceanShader(_TRITON->getOcean(), ::Triton::WATER_SURFACE, 0L, tritonCam), prefix, "WATER_SURFACE"));
         adapters.push_back( new osgEarth::NativeProgramAdapter(state, getOceanShader(_TRITON->getOcean(), ::Triton::WATER_SURFACE_PATCH, 0L, tritonCam), prefix, "WATER_SURFACE_PATCH"));
         adapters.push_back( new osgEarth::NativeProgramAdapter(state, getOceanShader(_TRITON->getOcean(), ::Triton::GOD_RAYS, 0L, tritonCam), prefix, "GOD_RAYS"));
@@ -231,7 +232,7 @@ TritonDrawable::drawImplementation(osg::RenderInfo& renderInfo) const
             pos3.normalize();
             float dot = osg::clampAbove(up*pos3, 0.0); dot*=dot;
             float sunAmbient = (float)osg::clampBetween( dot, 0.0f, 0.88f );
-            float fa = std::max(sunAmbient, ambient[0]);
+            float fa = osg::maximum(sunAmbient, ambient[0]);
 
             // Ambient color based on the zenith color in the cube map
             environment->SetAmbientLight( ::Triton::Vector3(fa, fa, fa) );
@@ -281,9 +282,14 @@ TritonDrawable::drawImplementation(osg::RenderInfo& renderInfo) const
         {
             osg::GLExtensions* ext = osg::GLExtensions::Get(state->getContextID(), true);
 
+            bool writeDepth = true;
+            const osg::Depth* depth = static_cast<const osg::Depth*>(state->getLastAppliedAttribute(osg::StateAttribute::DEPTH));
+            if (depth)
+                writeDepth = depth->getWriteMask();
+
             _TRITON->getOcean()->Draw(
                 renderInfo.getView()->getFrameStamp()->getSimulationTime() + osgEarth::Random().next(),
-                true, // depth writes
+                writeDepth, // depth writes
                 true, // draw water
                 false, // draw particles
                 NULL, // optional context

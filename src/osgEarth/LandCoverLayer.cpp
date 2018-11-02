@@ -98,7 +98,7 @@ namespace
         {
             if (sourceLayer->getEnabled() && 
                 sourceLayer->isKeyInLegalRange(key) &&
-                sourceLayer->mayHaveDataInExtent(key.getExtent()))
+                sourceLayer->mayHaveData(key))
             {
                 for(TileKey k = key; k.valid() && !image.valid(); k = k.createParentKey())
                 {
@@ -263,7 +263,21 @@ namespace
             const DataExtentList& de = layer->getDataExtents();
             for(DataExtentList::const_iterator dei = de.begin(); dei != de.end(); ++dei)
             {
-                getDataExtents().push_back(*dei);
+                if (!profile || dei->getSRS()->isHorizEquivalentTo(profile->getSRS()))
+                {
+                    getDataExtents().push_back(*dei);
+                }
+                else
+                {
+                    // Transform the data extents to the layer profile
+                    GeoExtent ep = dei->transform(profile->getSRS());
+                    DataExtent de(ep);
+                    if (dei->minLevel().isSet())
+                        de.minLevel() = profile->getEquivalentLOD(layer->getProfile(), dei->minLevel().get());
+                    if (dei->maxLevel().isSet())
+                        de.maxLevel() = profile->getEquivalentLOD(layer->getProfile(), dei->maxLevel().get());
+                    getDataExtents().push_back(de);
+                }
             }
         }
 
@@ -297,7 +311,7 @@ namespace
         ImageUtils::markAsUnNormalized(out.get(), true);
 
         // Allocate a suitable format:
-        GLint internalFormat = GL_LUMINANCE32F_ARB;
+        GLint internalFormat = GL_R16F;
 
         int tilesize = getPixelsPerTile();
 
@@ -311,11 +325,7 @@ namespace
         float du = 1.0f / (float)(out->s()-1);
         float dv = 1.0f / (float)(out->t()-1);
 
-        osg::Vec4 nodata;
-        if (internalFormat == GL_LUMINANCE16F_ARB)
-            nodata.set(-32768, -32768, -32768, -32768);
-        else
-            nodata.set(NO_DATA_VALUE, NO_DATA_VALUE, NO_DATA_VALUE, NO_DATA_VALUE);
+        osg::Vec4 nodata(NO_DATA_VALUE, NO_DATA_VALUE, NO_DATA_VALUE, NO_DATA_VALUE);
 
         unsigned pixelsWritten = 0u;
 

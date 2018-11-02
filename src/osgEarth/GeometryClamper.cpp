@@ -84,7 +84,7 @@ GeometryClamper::apply(osg::Drawable& drawable)
 
     osgUtil::IntersectionVisitor iv( _lsi.get() );
 
-    double r = std::min( em->getRadiusEquator(), em->getRadiusPolar() );
+    double r = osg::minimum( em->getRadiusEquator(), em->getRadiusPolar() );
 
     unsigned count = 0;
 
@@ -172,7 +172,11 @@ GeometryClamper::apply(osg::Drawable& drawable)
         }
         else
         {
+#if OSG_VERSION_LESS_THAN(3,6,0)
             geom->dirtyDisplayList();
+#else
+            geom->dirtyGLObjects();
+#endif
         }
 
         OE_DEBUG << LC << "clamped " << count << " verts." << std::endl;
