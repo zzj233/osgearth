@@ -26,7 +26,7 @@ void oe_Draping_VS(inout vec4 vertexView)
 #pragma import_defines(OE_DRAPING_MAX_CASCADES)
 
 uniform sampler2DArray oe_Draping_tex;
-uniform mat4 oe_Draping_texMatrix[4];
+uniform mat4 oe_Draping_texMatrix[OE_DRAPING_MAX_CASCADES];
 in vec4 oe_Draping_vertexView;
 
 void oe_Draping_FS(inout vec4 color)

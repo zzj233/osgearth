@@ -79,12 +79,13 @@ namespace osgEarth
             double _widthNDC, _heightNDC;
 
             void expandToInclude(const osg::Vec3d&);
-            void computeProjection(const osg::Matrix&, const osg::Matrix&, const osg::EllipsoidModel&, const osg::Plane&, double, const osg::Vec2d&, double, const osg::BoundingBoxd&, bool debug);
+            void computeProjection(const osg::Matrix&, const osg::Matrix&, const osg::EllipsoidModel&, const osg::Plane&, double, const osg::BoundingBoxd&);
             void computeClipCoverage(const osg::Matrix&, const osg::Matrix&);
             void makeProj(double dp);
 
             osg::ref_ptr<osg::Camera> _rtt;
             osg::Matrix _rttProj;
+            osg::ref_ptr<osg::StateSet> _stateSet;
         };
 
         // RTT configuration for a single master camera.
@@ -101,12 +102,13 @@ namespace osgEarth
             void initialize(osg::Camera* camera, DrapingDecorator&);
             void traverse(osgUtil::CullVisitor*, DrapingDecorator&, const osg::BoundingSphere&);
             void clear();
-            void constrainMaxExtToFrustum(const osg::Matrix&, const osg::Matrix&, bool, osg::Vec2d&, osg::BoundingBoxd& rttBox);
-            void constrainMaxExtToBounds(const osg::Matrix&, const osg::BoundingSphere&, osg::Vec2d&, osg::BoundingBoxd& rttBox);
+            void constrainRttBoxToFrustum(const osg::Matrix&, const osg::Matrix&, const osg::EllipsoidModel&, bool, osg::BoundingBoxd& rttBox);
+            void constrainRttBoxToBounds(const osg::Matrix&, const osg::BoundingSphere&, osg::BoundingBoxd& rttBox);
+            bool intersectTerrain(DrapingDecorator& dec, const osg::Vec3d& startWorld, const osg::Vec3d& endWorld, osg::Vec3d& output);
 
             void dump(const osg::Camera* cam, DrapingDecorator&);
 
-            osg::observer_ptr<osg::Camera> _token;
+            osg::observer_ptr<osg::Camera> _token;            
             void objectDeleted(void*);
             ~CameraLocal();
         };
@@ -122,7 +124,7 @@ namespace osgEarth
         bool _debug;
         osg::ref_ptr<const SpatialReference> _srs;
         bool _constrainMaxYToFrustum;
-        bool _constrainMaxExtToBounds;
+        bool _constrainRttBoxToDrapingSetBounds;
 
         // tracks drapable objects in the scene graph
         mutable DrapingManager _manager;

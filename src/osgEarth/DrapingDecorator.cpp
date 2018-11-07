@@ -46,14 +46,16 @@
 
 using namespace osgEarth;
 
+// Whether to intersect the ellipsoid versus the horizon plane when
+// building cascade bounding boxes. This will result in closer cascades
+// but less resolution at distance
 //#define USE_ELLIPSOID_INTERSECTIONS
 
-//#define USE_HARD_CODED_CASCADES
-
+// Enable this to generate an "--activity" readout of all cascade information
+//#define DEBUG_CASCADES
 
 // TODO ITEMS:
 // - Address the dangling CameraLocal when a view disappears
-// - Clamp maxExt to the frustum far plane extents
 
 DrapingDecorator::DrapingDecorator(const SpatialReference* srs, TerrainResources* resources) :
 _unit(-1),
@@ -66,7 +68,7 @@ _debug(false),
 _srs(srs),
 _resources(resources),
 _constrainMaxYToFrustum(false),
-_constrainMaxExtToBounds(true)
+_constrainRttBoxToDrapingSetBounds(true)
 {
     if (::getenv("OSGEARTH_DRAPING_DEBUG"))
         _debug = true;
@@ -95,7 +97,7 @@ _constrainMaxExtToBounds(true)
 
     c = ::getenv("OSGEARTH_DRAPING_CONSTRAIN_TO_BOUNDS");
     if (c)
-        _constrainMaxExtToBounds = atoi(c)?true:false;
+        _constrainRttBoxToDrapingSetBounds = atoi(c)?true:false;
 
     c = ::getenv("OSGEARTH_DRAPING_CONSTRAIN_TO_FRUSTUM");
     if (c)
@@ -238,7 +240,7 @@ namespace
     };
 
 
-    //! Intersect a clip-space ray with a plane.
+    //! Intersect a world-space ray with a plane.
     bool
     intersectRayWithPlane(const osg::Vec3d& L0,
                           const osg::Vec3d& L1,
@@ -253,8 +255,10 @@ namespace
         double dist = plane.distance(L0);
 
 #if 0
-        osg::Vec3d P0 = L0-N*dist; // point on the plane
-        double numer = (P0 - L0) * N; // always -dist? optimize out.
+        // Numerator always resolves to -dist, so this is commented out
+        // as an optimization. Leave it here to show why.
+        osg::Vec3d P0 = L0-N*dist;    // point on the plane
+        double numer = (P0 - L0) * N; // always -dist
         if (numer == 0)
             return false;
 #endif
@@ -275,16 +279,13 @@ namespace
         return true;
     }
 
+    //! Intersect a world-space ray with the ellipsoid
     bool
     intersectRayWithEllipsoid(const osg::Vec3d& p0,
                               const osg::Vec3d& p1,
                               const osg::EllipsoidModel& ellipsoid,
-                              osg::Vec3d& output,
-                              double& maxDist)
+                              osg::Vec3d& output)
     {
-#ifndef USE_ELLIPSOID_INTERSECTIONS
-        return false;
-#endif
         // reference frame (converts world ellipsoid to unit sphere)
         osg::Vec3d unitSphereFrame(
             1.0/ellipsoid.getRadiusEquator(),
@@ -325,7 +326,7 @@ namespace
 
         osg::Vec3d v = d*t0;
         output = p0 + v;
-        maxDist = osg::maximum(maxDist, (output-p0).length());
+        //maxDist = osg::maximum(maxDist, (output-p0).length());
         return true;
     }
 
@@ -394,7 +395,7 @@ DrapingDecorator::CameraLocal::initialize(osg::Camera* camera, DrapingDecorator&
 
     // Create the shared draping texture.
     osg::Texture2DArray* tex = new osg::Texture2DArray();
-    tex->setTextureSize(textureWidth, textureHeight, 4u); //_maxCascades);
+    tex->setTextureSize(textureWidth, textureHeight, osg::maximum(_maxCascades+1, 4u));
     tex->setInternalFormat(GL_RGBA);
     tex->setSourceFormat(GL_RGBA);
     tex->setSourceType(GL_UNSIGNED_BYTE);
@@ -490,26 +491,19 @@ DrapingDecorator::CameraLocal::clear()
 
 void DrapingDecorator::Cascade::expandToInclude(const osg::Vec3d& pointView)
 {
-    //_minX = std::min(_minX, pointView.x());
-    //_minY = std::min(_minY, pointView.y());
-    //_maxX = std::max(_maxX, pointView.x());
-    //_maxY = std::max(_maxY, pointView.y());
-
     _box.xMin() = osg::minimum(_box.xMin(), pointView.x());
     _box.yMin() = osg::minimum(_box.yMin(), pointView.y());
     _box.xMax() = osg::maximum(_box.xMax(), pointView.x());
     _box.yMax() = osg::maximum(_box.yMax(), pointView.y());
-
-    //_box.expandBy(pointView);
 }
 
 namespace
 {
-    void clipBox(osg::BoundingBoxd& box, const osg::BoundingBoxd& crop, double prevMaxY)
+    void clipBox(osg::BoundingBoxd& box, const osg::BoundingBoxd& crop) //, double prevMaxY)
     {
         box.xMin() = box.xMin() !=  DBL_MAX ? osg::maximum(box.xMin(), crop.xMin()) : crop.xMin();
         box.xMax() = box.xMax() != -DBL_MAX ? osg::minimum(box.xMax(), crop.xMax()) : crop.xMax();
-        box.yMin() = box.yMin() !=  DBL_MAX ? osg::maximum(box.yMin(), crop.yMin()) : prevMaxY; //crop.yMin();
+        box.yMin() = box.yMin() !=  DBL_MAX ? osg::maximum(box.yMin(), crop.yMin()) : crop.yMin();
         box.yMax() = box.yMax() != -DBL_MAX ? osg::minimum(box.yMax(), crop.yMax()) : crop.yMax();
     }
 }
@@ -518,46 +512,44 @@ void DrapingDecorator::Cascade::computeProjection(const osg::Matrix& rttView,
                                                   const osg::Matrix& iCamMVP,
                                                   const osg::EllipsoidModel& ellipsoid,
                                                   const osg::Plane& plane,
-                                                  double dp, 
-                                                  const osg::Vec2d& maxExt,
-                                                  double prevMaxY,
-                                                  const osg::BoundingBoxd& rttBox,
-                                                  bool debug)
+                                                  double dp,
+                                                  const osg::BoundingBoxd& rttBox)
 {
     osg::EllipsoidModel e;
 
     // intersect the view frustum's edge vectors with the horizon plane
     osg::Vec3d LL, LR, UL, UR;
-    bool LL_ok, LR_ok, UL_ok, UR_ok;
-    //UL_ok = intersectRayWithPlane(osg::Vec3d(-1, _maxClipY, -1)*iCamMVP, osg::Vec3d(-1, _maxClipY, +1)*iCamMVP, plane, UL);
-    //UR_ok = intersectRayWithPlane(osg::Vec3d(+1, _maxClipY, -1)*iCamMVP, osg::Vec3d(+1, _maxClipY, +1)*iCamMVP, plane, UR);
-    //LL_ok = intersectRayWithPlane(osg::Vec3d(-1, _minClipY, -1)*iCamMVP, osg::Vec3d(-1, _minClipY, +1)*iCamMVP, plane, LL);
-    //LR_ok = intersectRayWithPlane(osg::Vec3d(+1, _minClipY, -1)*iCamMVP, osg::Vec3d(+1, _minClipY, +1)*iCamMVP, plane, LR);
+    bool LL_ok=false, LR_ok=false, UL_ok=false, UR_ok=false;
    
     osg::Vec3d N, F;
 
-    double maxDist = 0.0;
-
     N = osg::Vec3d(-1,_maxClipY,-1)*iCamMVP, F = osg::Vec3d(-1,_maxClipY,+1)*iCamMVP;
-    UL_ok = intersectRayWithEllipsoid(N, F, ellipsoid, UL, maxDist);
+#ifdef USE_ELLIPSOID_INTERSECTIONS
+    UL_ok = intersectRayWithEllipsoid(N, F, ellipsoid, UL);
+#endif
     if (!UL_ok) UL_ok = intersectRayWithPlane(N, F, plane, UL);
 
     N = osg::Vec3d(+1,_maxClipY,-1)*iCamMVP, F = osg::Vec3d(+1,_maxClipY,+1)*iCamMVP;
-    UR_ok = intersectRayWithEllipsoid(N, F, ellipsoid, UR, maxDist);
+#ifdef USE_ELLIPSOID_INTERSECTIONS
+    UR_ok = intersectRayWithEllipsoid(N, F, ellipsoid, UR);
+#endif
     if (!UR_ok) UR_ok = intersectRayWithPlane(N, F, plane, UR);
     
     N = osg::Vec3d(-1,_minClipY,-1)*iCamMVP, F = osg::Vec3d(-1,_minClipY,+1)*iCamMVP;
-    LL_ok = intersectRayWithEllipsoid(N, F, ellipsoid, LL, maxDist);
+#ifdef USE_ELLIPSOID_INTERSECTIONS
+    LL_ok = intersectRayWithEllipsoid(N, F, ellipsoid, LL);
+#endif
     if (!LL_ok) LL_ok = intersectRayWithPlane(N, F, plane, LL);
 
     N = osg::Vec3d(+1,_minClipY,-1)*iCamMVP, F = osg::Vec3d(+1,_minClipY,+1)*iCamMVP;
-    LR_ok = intersectRayWithEllipsoid(N, F, ellipsoid, LR, maxDist);
+#ifdef USE_ELLIPSOID_INTERSECTIONS
+    LR_ok = intersectRayWithEllipsoid(N, F, ellipsoid, LR);
+#endif
     if (!LR_ok) LR_ok = intersectRayWithPlane(N, F, plane, LR);
 
     // next, transform each frustum point into RTT view space (looking down),
     // and expand the orthographic extents to include all valid points    
     _box.set(DBL_MAX, DBL_MAX, DBL_MAX, -DBL_MAX, -DBL_MAX, -DBL_MAX);
-    //_minX = DBL_MAX, _minY = DBL_MAX, _maxX = -DBL_MAX, _maxY = -DBL_MAX;
 
     // if all frustum edges intersect the horizon plane, calculate the region
     // bounded by the intersected area. Do this by projecting each point into
@@ -574,60 +566,31 @@ void DrapingDecorator::Cascade::computeProjection(const osg::Matrix& rttView,
     // Clamp the Y extent to 0 to prevent RTT-ing behind the camera.
     else if (LL_ok && LR_ok)
     {
-        //_minY = 0.0;
         _box.yMin() = 0.0;
     }
-
-    //double minYpre = _minY;
-    //double maxYpre = _maxY;
-    //bool minYclampedToZero = false;
-    //bool minYclampedToPrev = false;
-
-    // constrain the orthgraphic extents to the visible horizon in all directions.
-    //if (_minX == DBL_MAX || _minX < -maxExt.x()) _minX = -maxExt.x();
-    //if (_maxX == -DBL_MAX || _maxX > maxExt.x()) _maxX = maxExt.x();
-    //if (_minY == DBL_MAX || _minY < -maxExt.y()) _minY = prevMaxY;
-    //if (_maxY == -DBL_MAX || _maxY > maxExt.y()) _maxY = maxExt.y();
 
     // If looking forward, clamp the minimum Y to zero so we don't
     // clip geometry in front of us
-    if (_minClipY == -1.0 && _box.yMin() > 0.0) //_minY > 0.0)
+    if (_minClipY == -1.0 && _box.yMin() >= 0.0)
     {
         _box.yMin() = 0.0;
-        //_minY = 0.0;
-        //minYclampedToZero = true;
+
+        // bump to near clip plane
+        osg::Vec3d NP(0, -1, -1);
+        osg::Vec3d RT = NP * iCamMVP * rttView;
+        _box.yMin() = osg::maximum(0.0, RT.y());
     }
 
-    else if (_minClipY > -1.0)
-    {
-        _box.yMin() = prevMaxY;
-        //_minY = prevMaxY;
-        //minYclampedToPrev = true;
-    }
+    // constrain by original RTT box (e.g., bounds of geometry)
+    clipBox(_box, rttBox);
 
-    clipBox(_box, rttBox, prevMaxY);
-
-    //if (debug)
-    //{
-    //    OE_DEBUG << std::setprecision(7) 
-    //        << "_minY=" << _minY << "(" << minYpre << ")" 
-    //        << ", _maxY=" << _maxY << "(" << maxYpre << ")"
-    //        << ", clampZero=" << minYclampedToZero
-    //        << ", clampPrev=" << minYclampedToPrev
-    //        << ", maxDist=" << maxDist
-    //        << std::endl;
-    //}
-
-    // finally, compute the projection matrix.
-    // TODO: -dp may not always be enough of a near plane...? depends how high up the draped geom is.
-    //_rttProj.makeOrtho(_minX, _maxX, _minY, _maxY, -dp*4, dp);
+    // construct the projection matrix for RTT
     makeProj(dp);
 }
 
-void DrapingDecorator::Cascade::makeProj(double dp)
+void DrapingDecorator::Cascade::makeProj(double rttFar)
 {
-    //_rttProj.makeOrtho(_minX, _maxX, _minY, _maxY, -dp*4, dp);
-    _rttProj.makeOrtho(_box.xMin(), _box.xMax(), _box.yMin(), _box.yMax(), -dp*4, dp);
+    _rttProj.makeOrtho(_box.xMin(), _box.xMax(), _box.yMin(), _box.yMax(), -rttFar*4, rttFar);
 }
 
 // Computes the "coverage" of the RTT region in normalized [0..1] clip space.
@@ -650,6 +613,10 @@ void DrapingDecorator::Cascade::computeClipCoverage(const osg::Matrix& rttView, 
     osg::Vec3d winUL = osg::Vec3d(-1, _maxClipY, +1) * rttClipToCamClip;
     osg::Vec3d winUR = osg::Vec3d(+1, _maxClipY, +1) * rttClipToCamClip;
 
+    // NEW:
+    _minClipY = osg::minimum(winLL.y(), winLR.y());
+    _maxClipY = osg::maximum(winUL.y(), winUR.y());
+
     // width and height [0..1]
     _widthNDC = std::max(winUR.x() - winUL.x(), winLR.x() - winLL.x())*0.5 + 0.5;
     _heightNDC = (std::max(winUL.y(), winUR.y()) - std::min(winLL.y(), winLR.y()))*0.5 + 0.5;
@@ -658,10 +625,10 @@ void DrapingDecorator::Cascade::computeClipCoverage(const osg::Matrix& rttView, 
 #define MAXABS4(A,B,C,D) \
     osg::maximum(fabs(A), osg::maximum(fabs(B), osg::maximum(fabs(C),fabs(D))))
 
-void DrapingDecorator::CameraLocal::constrainMaxExtToFrustum(const osg::Matrix& iCamMVP, 
+void DrapingDecorator::CameraLocal::constrainRttBoxToFrustum(const osg::Matrix& iCamMVP, 
                                                              const osg::Matrix& rttView, 
+                                                             const osg::EllipsoidModel& ellipsoid,
                                                              bool constrainY,
-                                                             osg::Vec2d& maxExt,
                                                              osg::BoundingBoxd& rttBox)
 {
     // transform camera clip space into RTT view space (the maxExt space)
@@ -677,8 +644,6 @@ void DrapingDecorator::CameraLocal::constrainMaxExtToFrustum(const osg::Matrix& 
         osg::Vec3d farLR = osg::Vec3d(+1,-1,+1)*camProjToRttView;
         osg::Vec3d farUL = osg::Vec3d(-1,+1,+1)*camProjToRttView;
         osg::Vec3d farUR = osg::Vec3d(+1,+1,+1)*camProjToRttView;
-        maxExt.x() = osg::minimum(maxExt.x(), MAXABS4(farLL.x(), farLR.x(), farUL.x(), farUR.x()));
-        maxExt.y() = osg::minimum(maxExt.y(), MAXABS4(farLL.y(), farLR.y(), farUL.y(), farUR.y()));
         double x = osg::minimum(rttBox.xMax(), MAXABS4(farLL.x(), farLR.x(), farUL.x(), farUR.x()));
         double y = osg::minimum(rttBox.yMax(), MAXABS4(farLL.y(), farLR.y(), farUL.y(), farUR.y()));
         rttBox.set(-x, -y, 0, x, y, 0);
@@ -687,39 +652,40 @@ void DrapingDecorator::CameraLocal::constrainMaxExtToFrustum(const osg::Matrix& 
     {
         osg::Vec3d farLL = osg::Vec3d(-1,-1,+1)*camProjToRttView;
         osg::Vec3d farUR = osg::Vec3d(+1,+1,+1)*camProjToRttView;
-        maxExt.x() = osg::minimum(maxExt.x(), osg::maximum(fabs(farLL.x()), fabs(farUR.x())));
         double x = osg::minimum(rttBox.xMax(), osg::maximum(fabs(farLL.x()), fabs(farUR.x())));
         rttBox.xMin() = -x, rttBox.xMax() = x;
     }
 }
 
-void DrapingDecorator::CameraLocal::constrainMaxExtToBounds(const osg::Matrix& rttView, 
+void DrapingDecorator::CameraLocal::constrainRttBoxToBounds(const osg::Matrix& rttView, 
                                                             const osg::BoundingSphere& bound, 
-                                                            osg::Vec2d& maxExt,
                                                             osg::BoundingBoxd& rttBox)
 {
-    double yrad = maxExt.y();
-
+    // center point in RTT view space:
     osg::Vec3d c = bound.center() * rttView;
-    double r = bound.radius();
-    // rttView has no scale components so just use bound.radius
-    
-    // case: bounds are inside the max extent: clamp to largest
-    double N = (c.y()-r)-(-maxExt.y());
-    double F = maxExt.y()-(c.y()+r);
-    if (N > 0.0 && F > 0.0)
-        maxExt.y() = maxExt.y() - osg::minimum(N, F);
 
-    // case: x bounds are inside
-    N = (c.x()-r)-(-maxExt.x());
-    F = maxExt.x()-(c.x()+r);
-    if (N > 0.0 && F > 0.0)
-        maxExt.x() -= osg::minimum(N, F);
+    // radius (no scale? what is the earth is scaled?)
+    double r = bound.radius();
     
     rttBox.yMin() = osg::maximum(rttBox.yMin(), c.y()-r);
     rttBox.yMax() = osg::minimum(rttBox.yMax(), c.y()+r);
     rttBox.xMin() = osg::maximum(rttBox.xMin(), c.x()-r);
     rttBox.xMax() = osg::minimum(rttBox.xMax(), c.x()+r);
+}
+
+bool
+DrapingDecorator::CameraLocal::intersectTerrain(DrapingDecorator& terrain, const osg::Vec3d& startWorld, const osg::Vec3d& endWorld, osg::Vec3d& outputWorld)
+{
+    osgUtil::LineSegmentIntersector* lsi = new osgUtil::LineSegmentIntersector(osgUtil::Intersector::MODEL, startWorld, endWorld);
+    lsi->setIntersectionLimit(lsi->LIMIT_NEAREST);
+    osgUtil::IntersectionVisitor iv(lsi);
+    terrain.accept(iv);
+    bool hit = lsi->containsIntersections();
+    if (hit)
+    {
+        outputWorld = lsi->getFirstIntersection().getWorldIntersectPoint();
+    }
+    return hit;
 }
 
 void
@@ -760,13 +726,12 @@ DrapingDecorator::CameraLocal::traverse(osgUtil::CullVisitor* cv, DrapingDecorat
     // distance to the visible horizon (in any direction)
     double dh;
 
-    // shortest distance from the camera to the horizon plane (straight down)
+    // Shortest distance from the camera to the horizon plane (straight down)
     double dp;
     
     // Maximum theorectical extent of the draping region; i.e. the distance
     // from the camera to the visible horizon projected onto the horizon plane.
     // This the largest possible extent we will need for RTT.
-    osg::Vec2d maxExt;
     osg::BoundingBoxd rttBox;
 
     const osg::EllipsoidModel& ellipsoid = *decorator._srs->getEllipsoid();
@@ -788,8 +753,7 @@ DrapingDecorator::CameraLocal::traverse(osgUtil::CullVisitor* cv, DrapingDecorat
     }
 
     // project visible horizon distance into the horizon plane:
-    double m = sqrt(dh*dh - dp*dp);    
-    maxExt.set(m, m);
+    double m = sqrt(dh*dh - dp*dp);
     rttBox.set(-m, -m, 0, m, m, 0);
 
     // Create a view matrix that looks straight down at the horizon plane form the eyepoint.
@@ -800,118 +764,169 @@ DrapingDecorator::CameraLocal::traverse(osgUtil::CullVisitor* cv, DrapingDecorat
     osg::Vec3d rttUp = rttLook ^ camLeft;
     rttView.makeLookAt(camEye, camEye + rttLook, rttUp);
 
-    // so far, maxExt is a theoretical max. Now we can constrain it based on
-    // the actual far clip plane.
-    constrainMaxExtToFrustum(iCamMVP, rttView, decorator._constrainMaxYToFrustum, maxExt, rttBox);
+    osg::Matrix iRttView;
+    iRttView.invert(rttView);
+
+    // So far, rttBox is a theoretical max. Now we can constrain it based on
+    // the actual camera frustum and (optionally) far clip plane. 
+    // Constraining the the far clip gives a tigher bounds, but can result in 
+    // "resolution jumps" as the camera moves around and the far clip plane
+    // jumps around.
+    constrainRttBoxToFrustum(iCamMVP, rttView, ellipsoid, decorator._constrainMaxYToFrustum, rttBox);
 
     // further constrain the max extent based on the bounds of the draped geometry
-    if (decorator._constrainMaxExtToBounds)
+    if (decorator._constrainRttBoxToDrapingSetBounds)
     {
-        constrainMaxExtToBounds(rttView, bounds, maxExt, rttBox);
+        constrainRttBoxToBounds(rttView, bounds, rttBox);
     }
 
     // camera view -> world
     osg::Matrix iCamMV;
     iCamMV.invert(camMV);
 
-    // xform from clip [-1..1] to texture [0..1] space
-    static const osg::Matrix clipToTex =
-        osg::Matrix::translate(1.0, 1.0, 1.0) *
-        osg::Matrix::scale(0.5, 0.5, 0.5);
-
     // Start by computing the full extent of the RTT region. We will use the results
     // of this math to decide how many cascades we need to use. (We are using 
     // cascade[0] here as a temporary workspace, but will re-use it later for the actual
     // highest resolution cascade).
     _cascades[0]._minClipY = -1.0;
-    _cascades[0]._maxClipY =  1.0;
-    _cascades[0].computeProjection(rttView, iCamMVP, ellipsoid, horizonPlane, dp, maxExt, -maxExt.y(), rttBox, decorator._debug);
+    _cascades[0]._maxClipY = 1.0;
+    _cascades[0].computeProjection(rttView, iCamMVP, ellipsoid, horizonPlane, dp, rttBox); //rttBox.yMin(), rttBox);
 
     // Next compute the extent, in pixels, of the full RTT. If it's larger than our
     // texture cascade size, we may need multiple cascases.
     _cascades[0].computeClipCoverage(rttView, camMVP);
 
-    // Prepare to write to the texture matrix array.
-    // (Use the gloal maxCascades here regardless of this CameraLocal's maxCascades)
-    ArrayUniform texMat("oe_Draping_texMatrix", osg::Uniform::FLOAT_MAT4, _terrainSS.get(), decorator._maxCascades);
+    // Update the main RTT box with the new computation:
+    rttBox = _cascades[0]._box;
 
-#ifdef USE_HARD_CODED_CASCADES
-    // HARD-CODED CASCADE limits. We determined these hueristically. Later if necessary
-    // we can attempt to compute optimal values using the results of the computeClipCoverage
-    // method.
-    {
-        // heightNDC is the Y-extent of the draping region's normalized [0..1] clip space.
-        // For example, if heightHDC is 3.0, that means the draping region is 3x deeper 
-        // than the texture size we're using, so we need multiple cascades to cover it.
-        // The following values we determined hueristacally.
-        double h = _cascades[0]._heightNDC;
-
-        _cascades[0]._minClipY = -1.00;
-        _cascades[0]._maxClipY = -0.95; //-1.00 + 1.0/h;
-
-        _cascades[1]._minClipY = _cascades[0]._maxClipY;
-        _cascades[1]._maxClipY = -0.15;
-
-        _cascades[2]._minClipY = _cascades[1]._maxClipY;
-        _cascades[2]._maxClipY =  0.35;
-
-        _cascades[3]._minClipY = _cascades[2]._maxClipY;
-        _cascades[3]._maxClipY =  1.00;
-
-        _numCascades =
-            h >= 4.5 && _maxCascades >= 4 ? 4 :
-            h >= 3.0 && _maxCascades >= 3 ? 3 :
-            h >= 1.5 && _maxCascades >= 2 ? 2 : 1;
-
-        // For the "camera looking mostly down" case, split the frustum in half to get
-        // maximum coverage. Another hueristic tweak.
-        double camDotRtt = camLook * rttLook;
-        if (_numCascades == 2 && camDotRtt > 0.5)
-        {
-            double m = _cascades[0]._maxClipY;
-            _cascades[0]._maxClipY = _cascades[1]._minClipY = mix(m, 0, camDotRtt);
-        }
-
-        _cascades[_numCascades-1]._maxClipY = 1.0;
-    }
-#else
     // Compute the nunber and size of the draping cascades.
     {
-        double ts = decorator._texSize;
-        double h = osg::maximum(_cascades[0]._heightNDC, 1.0);
-        double hpx = h * ts;
-        double hc = ts / hpx;
-        
-        float minClipCoverage = 0.25;
-        hc = osg::maximum(hc, (double)minClipCoverage);
-        _numCascades = 0u;
+        // Interesect the terrain along the view vector.
+        // Use this information to gauge the relative elevation near the camera
+        // so we can increase the resolution of the near cascade if necessary.
+        optional<double> firstYMax(rttBox.yMax());
 
-        double prevMaxClipY = -1.0;
-        for(; hpx > 0.0 && _numCascades < decorator._maxCascades; _numCascades++, hpx -= ts)
+        if (rttBox.yMin() >= 0.0)
         {
-            Cascade& cascade = _cascades[_numCascades];
-
-            hc = osg::maximum(ts/hpx, (double)minClipCoverage); // experiment with whether to do this.
-            cascade._minClipY = prevMaxClipY;
-            cascade._maxClipY = prevMaxClipY + 2.0*hc;
-            prevMaxClipY += 2.0*hc;
+            osg::Vec3d camFar = osg::Vec3d(0,0,1) * iCamMVP;
+            osg::Vec3d isect;
+            if (intersectTerrain(decorator, camEye, camFar, isect))
+            {
+                isect = isect * rttView;        // terrain look-at point in rttView space
+                double hat = -isect.z();        // height above terrain
+                double ymax = isect.y() + hat;
+                firstYMax = ymax;
+            }
         }
 
-        _cascades[_numCascades-1]._maxClipY = 1.0;
-    }
+#ifdef DEBUG_CASCADES
+        std::stringstream buf;
 #endif
 
+        // Height (Y-span) of the RTT box in meters
+        double rttHeight = rttBox.yMax() - rttBox.yMin();
+
+        // Height (Y-span) of the RTT box [0..1]
+        double rttHeightNDC = osg::maximum(_cascades[0]._heightNDC, 1.0);
+
+        // Number of texels it will take to represent the RTT frustum:
+        double totalTexels = rttHeightNDC * decorator._texSize;
+
+        // Texels still needed
+        double remainingTexels = totalTexels;
+        
+#ifdef DEBUG_CASCADES
+        buf << "\nTexels: " << totalTexels
+            << "\nHeight: " << rttHeight << "m"
+            << "\nHeightNDC: " << rttHeightNDC
+            << "\nRttbox: " << rttBox.yMin() << " -> " << rttBox.yMax();
+#endif
+
+        // resolution, roughly
+        double metersPerTexel = rttHeight / totalTexels;
+
+        // Start with one cascade and keep adding them until we don't need any more.
+        for(_numCascades = 0u; 
+            remainingTexels > 0.0 && _numCascades < decorator._maxCascades;
+            _numCascades++)
+        {
+            Cascade& cascade = _cascades[_numCascades];
+            
+#ifdef DEBUG_CASCADES
+            buf << "\nCascade " << _numCascades << ": ";
+#endif
+
+            // Number of texels this cascade will consume:
+            double texels = osg::minimum((double)decorator._texSize, remainingTexels);
+
+            // near extent in rtt view space:
+            double ymin = _numCascades > 0? _cascades[_numCascades-1]._box.yMax() : rttBox.yMin();
+
+            // far extent in rtt view space:
+            double ymax = ymin + (texels * metersPerTexel);
+
+            // If we calculated a special YMax for the first cascade, apply it now:
+            if (_numCascades == 0 && firstYMax.isSet() && firstYMax.get() < ymax)
+            {
+                ymax = firstYMax.get();
+            }
+
+            // Set the Y extents of the RTT projection:
+            cascade._box.yMin() = ymin;
+            cascade._box.yMax() = ymax;
+            
+            // If this the final cascade, force the Y to the maximum:
+            if (texels >= remainingTexels ||
+                ymax >= rttBox.yMax() ||
+                _numCascades+1 == decorator._maxCascades)
+            {
+                cascade._box.yMax() = rttBox.yMax();
+            }
+
+            // Track the number of texels we still need:
+            remainingTexels -= texels;
+
+            // Calculate the X extents of the cascade (widest necessary to accommodate).            
+            osg::Vec3d point(0.0, cascade._box.yMax(), -dp); // Point in RTT view space at yMax on the horizon plane
+            osg::Vec3d camClip = point * iRttView * camMVP;  // Xform into camera's clip space
+            double camClipY = camClip.y();
+            osg::Vec3d P;
+            intersectRayWithPlane(camEye, osg::Vec3d(+1,camClipY,+1)*iCamMVP, horizonPlane, P);
+            cascade._box.xMax() = (P * rttView).x();
+            cascade._box.xMin() = -cascade._box.xMax();
+
+            // Finally assemble the projection matrix.
+            cascade.makeProj(dp);
+            
+#ifdef DEBUG_CASCADES
+            buf << "\n  Texels: " << texels
+                << "\n  Range: " << cascade._box.yMin() << " -> " << cascade._box.yMax()
+                << "\n  Coverage: " << 100*(texels/totalTexels) << "%"
+                << "\n  MetersPerTexel: " << metersPerTexel;            
+#endif
+        }
+        
+#ifdef DEBUG_CASCADES
+        if (camera->getName() == "dump")
+            osgEarth::Registry::instance()->startActivity("Cascades", buf.str());
+#endif
+    }
+
+
+    // xform from clip [-1..1] to texture [0..1] space
+    static const osg::Matrix clipToTex =
+        osg::Matrix::translate(1.0, 1.0, 1.0) *
+        osg::Matrix::scale(0.5, 0.5, 0.5);
+    
     // For each active cascade, configure its RTT camera and build the
     // texture projection matrix
+    ArrayUniform texMat("oe_Draping_texMatrix", osg::Uniform::FLOAT_MAT4, _terrainSS.get(), decorator._maxCascades);
     unsigned i;
+
     for (i = 0; i < _numCascades; ++i)
     {
         Cascade& cascade = _cascades[i];
         osg::Camera* rtt = cascade._rtt.get();
-
-        //double prevMaxY = i == 0 ? -maxExt.y() : _cascades[i-1]._maxY;
-        double prevMaxY = i == 0 ? rttBox.yMin() : _cascades[i-1]._box.yMax();
-        cascade.computeProjection(rttView, iCamMVP, ellipsoid, horizonPlane, dp, maxExt, prevMaxY, rttBox, false);
 
         // configure the RTT camera's matrices:
         rtt->setViewMatrix(rttView);
@@ -935,7 +950,8 @@ DrapingDecorator::CameraLocal::traverse(osgUtil::CullVisitor* cv, DrapingDecorat
         cv->pushStateSet(_rttSS.get());
         for (unsigned i = 0; i < _numCascades; ++i)
         {
-            _cascades[i]._rtt->accept(*cv);
+            Cascade& c = _cascades[i];
+            c._rtt->accept(*cv);
         }
         cv->popStateSet(); // _rttSS
     }
