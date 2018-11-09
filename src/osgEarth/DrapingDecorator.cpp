@@ -847,7 +847,7 @@ DrapingDecorator::CameraLocal::traverse(osgUtil::CullVisitor* cv, DrapingDecorat
 
         // Start with one cascade and keep adding them until we don't need any more.
         for(_numCascades = 0u; 
-            remainingTexels > 0.0 && _numCascades < decorator._maxCascades;
+            remainingTexels > 0.0 && _numCascades < _maxCascades;
             _numCascades++)
         {
             Cascade& cascade = _cascades[_numCascades];
@@ -876,9 +876,9 @@ DrapingDecorator::CameraLocal::traverse(osgUtil::CullVisitor* cv, DrapingDecorat
             cascade._box.yMax() = ymax;
             
             // If this the final cascade, force the Y to the maximum:
-            if (texels >= remainingTexels ||
-                ymax >= rttBox.yMax() ||
-                _numCascades+1 == decorator._maxCascades)
+            if (texels >= remainingTexels ||            // out of texels?
+                ymax >= rttBox.yMax()     ||            // exceeded RTT range?
+                _numCascades+1 == _maxCascades)         // exceeded cascade count?
             {
                 cascade._box.yMax() = rttBox.yMax();
             }
@@ -937,7 +937,7 @@ DrapingDecorator::CameraLocal::traverse(osgUtil::CullVisitor* cv, DrapingDecorat
         texMat.setElement(i, iCamMV * rttView * cascade._rttProj * clipToTex);
     }
 
-    if (i < decorator._maxCascades)
+    if (i < _maxCascades)
     {
         // install a "marker" matrix that tells the shader we're past the final cascade.
         static osg::Matrix marker(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
