@@ -24,10 +24,11 @@ before_install:
 - sudo apt-get install -y libsqlite3-dev
 - sudo apt-get install -y protobuf-compiler libprotobuf-dev
 - sudo apt-get install -y libpoco-dev
+- sudo apt-get install -y ninja-build
 # Debug print out osgversion
 - osgversion
 script:
-- if [ "${COVERITY_SCAN_BRANCH}" != 1 ]; then cmake -DCMAKE_BUILD_TYPE=Release . && make -j3 && sudo make install && sudo ldconfig; fi
+- if [ "${COVERITY_SCAN_BRANCH}" != 1 ]; then cmake -G Ninja -DCMAKE_BUILD_TYPE=Release . && ninja && sudo ninja install && sudo ldconfig; fi
 - if [ "${COVERITY_SCAN_BRANCH}" != 1 ]; then cd tests && osgEarth_tests ; fi
 notifications:
   slack:
