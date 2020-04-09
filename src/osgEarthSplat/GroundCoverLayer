@@ -28,6 +28,7 @@
 #include <osgEarth/PatchLayer>
 #include <osgEarth/LayerReference>
 #include <osgEarth/LandCoverLayer>
+#include <osgEarth/InstanceCloud>
 
 namespace osgEarth { namespace Splat
 {
@@ -151,7 +152,8 @@ namespace osgEarth { namespace Splat
                 void reset(const osg::State*, Settings*);
 
                 // Geometry differs by zone/groundcover settings
-                typedef UnorderedMap<const void*, osg::ref_ptr<osg::Geometry> > GeomPerGroundCover;
+                //typedef UnorderedMap<const void*, osg::ref_ptr<osg::Geometry> > GeomPerGroundCover;
+                typedef UnorderedMap<const void*, osg::ref_ptr<InstanceCloud> > GeomPerGroundCover;
                 GeomPerGroundCover _geom;
 
                 osg::ref_ptr<osg::ElementBufferObject> _ebo;

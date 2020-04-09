@@ -578,7 +578,7 @@ GroundCoverLayer::buildStateSets()
                 //zoneStateSet->setDefine("OE_GROUNDCOVER_NUM_INSTANCES", "132");
 
 #ifdef USE_INSTANCING_IN_VERTEX_SHADER
-                zoneStateSet->setDefine("OE_GROUNDCOVER_USE_INSTANCING");
+                //zoneStateSet->setDefine("OE_GROUNDCOVER_USE_INSTANCING");
 #endif
 
 #endif
@@ -754,8 +754,8 @@ GroundCoverLayer::createGeometry(unsigned vboTileDim) const
 
 #ifdef USE_INSTANCING_IN_VERTEX_SHADER
 
-    static const GLubyte indices[12] = { 0,1,2,2,1,3, 4,5,6,6,5,7 };
-    out_geom->addPrimitiveSet(new osg::DrawElementsUByte(GL_TRIANGLES, 12, &indices[0], numInstances));
+    static const GLushort indices[12] = { 0,1,2,2,1,3, 4,5,6,6,5,7 };
+    out_geom->addPrimitiveSet(new osg::DrawElementsUShort(GL_TRIANGLES, 12, &indices[0], numInstances));
 
     // We don't actually need any verts. Is it OK not to set an array?
     //geom->setVertexArray(new osg::Vec3Array(8));
@@ -845,7 +845,7 @@ GroundCoverLayer::Renderer::DrawState::reset(const osg::State* state, Settings* 
 
     // Check for initialization in this zone:
     const GroundCover* groundcover = GroundCoverSA::extract(state)->_groundcover;
-    osg::ref_ptr<osg::Geometry>& geom = _geom[groundcover];
+    osg::ref_ptr<InstanceCloud>& geom = _geom[groundcover];
 
     if (!geom.valid())
     {
@@ -864,7 +864,9 @@ GroundCoverLayer::Renderer::DrawState::reset(const osg::State* state, Settings* 
             _numInstances1D = 128;
         }
 
-        geom = _renderer->_layer->createGeometry(_numInstances1D);
+        geom = new InstanceCloud();
+        geom->setGeometry(_renderer->_layer->createGeometry(_numInstances1D));
+        geom->setNumInstances(_numInstances1D, _numInstances1D);
     }
 }
 
@@ -920,10 +922,23 @@ GroundCoverLayer::Renderer::draw(osg::RenderInfo& ri, const DrawContext& tile, o
     DrawState& ds = _drawStateBuffer[ri.getContextID()];
     osg::GLExtensions* ext = osg::GLExtensions::Get(ri.getContextID(), true);
 
+    const GroundCoverSA* sa = GroundCoverSA::extract(ri.getState());
+    osg::ref_ptr<InstanceCloud>& geom = ds._geom[sa->_groundcover];
+
+    //***************TODO*********************
+    // Both programs' need the uniforms set.
+    // We should store the UL's separately for each PCP
+    // and apply them as necessary.
+    // ...and what about uniforms from the Layer's state set? 
+    // ... we're going to need those too. So we are going to 
+    // ... probably need to accept the compute shader program
+    // ... during cull, just saying.
+    geom->bind(ri);
+
     // find the uniform location for our uniforms if necessary.
     // (only necessary when the PCP has changed)
     const osg::Program::PerContextProgram* pcp = ri.getState()->getLastAppliedProgramObject();
-    if (pcp != ds._pcp || ds._numInstancesUL < 0)
+    //if (pcp != ds._pcp || ds._numInstancesUL < 0)
     {
         if (pcp == NULL)
         {
@@ -940,7 +955,7 @@ GroundCoverLayer::Renderer::draw(osg::RenderInfo& ri, const DrawContext& tile, o
 
     // on the first draw call this frame, initialize the uniform that tells the
     // shader the total number of instances:
-    if (ds._tilesDrawnThisFrame == 0)
+    //if (ds._tilesDrawnThisFrame == 0)
     {
         osg::Vec2f numInstances(ds._numInstances1D, ds._numInstances1D);
         ext->glUniform2fv(ds._numInstancesUL, 1, numInstances.ptr());
@@ -950,7 +965,8 @@ GroundCoverLayer::Renderer::draw(osg::RenderInfo& ri, const DrawContext& tile, o
 #else
         const int useInstancedModel = 0;
 #endif
-        ext->glUniform1i(ds._instancedModelUL, useInstancedModel);
+        if (ds._instancedModelUL >= 0)
+            ext->glUniform1i(ds._instancedModelUL, useInstancedModel);
     }
 
     // transmit the extents of this tile to the shader, skipping the glUniform
@@ -961,22 +977,65 @@ GroundCoverLayer::Renderer::draw(osg::RenderInfo& ri, const DrawContext& tile, o
     const osg::Vec3f& LL = bbox.corner(0);
     const osg::Vec3f& UR = bbox.corner(3);
 
-    if (LL != ds._LLAppliedValue)
+    //if (LL != ds._LLAppliedValue)
     {
         ext->glUniform3fv(ds._LLUL, 1, LL.ptr());
         ds._LLAppliedValue = LL;
     }
 
-    if (UR != ds._URAppliedValue)
+    //if (UR != ds._URAppliedValue)
     {
         ext->glUniform3fv(ds._URUL, 1, UR.ptr());
         ds._URAppliedValue = UR;
     }
 
-    const GroundCoverSA* sa = GroundCoverSA::extract(ri.getState());
-    osg::ref_ptr<osg::Geometry>& geom = ds._geom[sa->_groundcover];
-
     // draw the instanced billboard geometry:
+    geom->cull(ri);
+
+    pcp = ri.getState()->getLastAppliedProgramObject();
+    //if (pcp != ds._pcp || ds._numInstancesUL < 0)
+    {
+        if (pcp == NULL)
+        {
+            //OE_WARN << "[GroundCoverLayer] ILLEGAL STATE - getLastAppliedProgramObject == NULL. Contact support." << std::endl;
+            return;
+        }
+        ds._numInstancesUL = pcp->getUniformLocation(_numInstancesUName);
+        ds._LLUL = pcp->getUniformLocation(_LLUName);
+        ds._URUL = pcp->getUniformLocation(_URUName);
+        ds._instancedModelUL = pcp->getUniformLocation(_instancedModelUName);
+
+        ds._pcp = pcp;
+    }
+
+    // on the first draw call this frame, initialize the uniform that tells the
+    // shader the total number of instances:
+    //if (ds._tilesDrawnThisFrame == 0)
+    {
+        osg::Vec2f numInstances(ds._numInstances1D, ds._numInstances1D);
+        ext->glUniform2fv(ds._numInstancesUL, 1, numInstances.ptr());
+
+#ifdef TEST_MODEL_INSTANCING
+        const int useInstancedModel = 1;
+#else
+        const int useInstancedModel = 0;
+#endif
+        if (ds._instancedModelUL >= 0)
+            ext->glUniform1i(ds._instancedModelUL, useInstancedModel);
+    }
+
+    //if (LL != ds._LLAppliedValue)
+    {
+        ext->glUniform3fv(ds._LLUL, 1, LL.ptr());
+        ds._LLAppliedValue = LL;
+    }
+
+    //if (UR != ds._URAppliedValue)
+    {
+        ext->glUniform3fv(ds._URUL, 1, UR.ptr());
+        ds._URAppliedValue = UR;
+    }
+
     geom->draw(ri);
 
     ++ds._tilesDrawnThisFrame;
@@ -1008,7 +1067,7 @@ GroundCoverLayer::Renderer::resizeGLObjectBuffers(unsigned maxSize)
         {
             if (j->second.valid())
             {
-                j->second->resizeGLObjectBuffers(maxSize);
+                //j->second->resizeGLObjectBuffers(maxSize);
             }
         }
     }
@@ -1026,7 +1085,7 @@ GroundCoverLayer::Renderer::releaseGLObjects(osg::State* state) const
         {
             if (j->second.valid())
             {
-                j->second->releaseGLObjects(state);
+                //j->second->releaseGLObjects(state);
             }
         }
     }
@@ -1038,4 +1097,17 @@ GroundCoverLayer::loadShaders(VirtualProgram* vp, const osgDB::Options* options)
     GroundCoverShaders shaders;
     shaders.load(vp, shaders.GroundCover_VS, options);
     shaders.load(vp, shaders.GroundCover_FS, options);
+
+    const char* oe_IC_renderVS =
+        "#version 430 \n"
+
+        "layout(std430, binding=2) buffer RenderBuffer { \n"
+        "    vec4 render[]; \n"
+        "}; \n"
+
+        "void oe_IC_renderVS(inout vec4 vertex) { \n"
+        "    vertex.xyz += render[gl_InstanceID].xyz; \n"
+        "} \n";
+
+    vp->setFunction("oe_IC_renderVS", oe_IC_renderVS, ShaderComp::LOCATION_VERTEX_MODEL, -FLT_MAX);
 }

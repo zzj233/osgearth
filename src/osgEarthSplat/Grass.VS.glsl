@@ -119,12 +119,8 @@ void oe_Grass_VS(inout vec4 vertex)
     // intialize with a "no draw" value:
     oe_GroundCover_atlasIndex = -1.0;
 
-    // input: 8 verts per instance so we can expand into a dual billboard
-#ifdef OE_GROUNDCOVER_USE_INSTANCING
-    int instanceID = gl_InstanceID;
-#else
+    // input: 16 verts per instance so we can expand into a dual billboard
     int instanceID = gl_VertexID / 16;
-#endif
 
     // Generate the UV tile coordinates (oe_layer_tilec) based on the current instance number
     vec2 numInstances = oe_GroundCover_numInstances;
@@ -142,13 +138,13 @@ void oe_Grass_VS(inout vec4 vertex)
     oe_noise = textureLod(oe_GroundCover_noiseTex, oe_layer_tilec.st, 0);
 
     // randomly shift each point off center
-    vec2 shift = vec2(fract(oe_noise[NOISE_RANDOM]*5.5), fract(oe_noise[NOISE_RANDOM_2]*5.5))*2-1;
-    oe_layer_tilec.st += shift*halfSpacing;
+    //vec2 shift = vec2(fract(oe_noise[NOISE_RANDOM]*5.5), fract(oe_noise[NOISE_RANDOM_2]*5.5))*2-1;
+    //oe_layer_tilec.st += shift*halfSpacing;
 
     // interpolate to correct position within the tile
-    vertex.xyz +=
-        gl_NormalMatrix *  // model to view
-        vec3(mix(oe_GroundCover_LL.xy, oe_GroundCover_UR.xy, oe_layer_tilec.st), 0);
+    //vertex.xyz +=
+    //    gl_NormalMatrix *  // model to view
+    //    vec3(mix(oe_GroundCover_LL.xy, oe_GroundCover_UR.xy, oe_layer_tilec.st), 0);
 
     // Sample the landcover data. Must do this BEFORE calling getBiomeIndex.
     oe_LandCover_coverage = textureLod(OE_LANDCOVER_TEX, (OE_LANDCOVER_TEX_MATRIX*oe_layer_tilec).st, 0).r;

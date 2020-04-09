@@ -98,6 +98,7 @@ namespace
     //    }
     //);
 
+#if 0
     const char* cull_CS =
         "#version 430\n"
 
@@ -137,6 +138,69 @@ namespace
         "    { \n"
         "        uint slot = atomicAdd(cmd[0].instanceCount, 1); \n"
         "        render[slot] = points[i]; \n"
+        "    } \n"
+        "} \n";
+#endif
+
+    const char* cull_CS =
+        "#version 430\n"
+
+        "layout(local_size_x=1, local_size_y=1, local_size_z=1) in; \n"
+
+        "struct DrawElementsIndirectCommand { \n"
+        "    uint count; \n"
+        "    uint instanceCount; \n"
+        "    uint firstIndex; \n"
+        "    uint baseVertex; \n"
+        "    uint baseInstance; \n"
+        "}; \n"
+
+        "layout(std430, binding=0) buffer DrawCommandsBuffer { \n"
+        "    DrawElementsIndirectCommand cmd[]; \n"
+        "}; \n"
+
+        "layout(std430, binding=1) buffer PointsBuffer { \n"
+        "    vec4 points[]; \n"
+        "}; \n"
+
+        "layout(std430, binding=2) buffer RenderBuffer { \n"
+        "    vec4 render[]; \n"
+        "}; \n"
+
+        "bool visible(in vec4 model) \n"
+        "{ \n"
+        "    vec4 clip = gl_ModelViewProjectionMatrix * model; \n"
+        "    clip.xyz = abs(clip.xyz/clip.w); \n"
+        "    const float f = 1.0; \n"
+        "    return clip.x <= f && clip.y <= f; \n"
+        "} \n"
+
+        "uniform vec2 oe_GroundCover_numInstances; \n"
+        "uniform vec2 oe_GroundCover_LL; \n"
+        "uniform vec2 oe_GroundCover_UR; \n"
+
+        "void main() { \n"
+        "    const uint x = gl_GlobalInvocationID.x; \n"
+        "    const uint y = gl_GlobalInvocationID.y; \n"
+
+        "    vec2 dim = oe_GroundCover_numInstances; \n"
+
+        "    vec2 offset = vec2(float(x), float(y)); \n"
+        "    vec2 halfSpacing = 0.5/dim; \n"
+        "    vec2 tilec = halfSpacing + offset/dim; \n"
+
+        //"    //TODO: noise shift \n"
+
+        "    vec4 vertex = vec4(mix(oe_GroundCover_LL.xy, oe_GroundCover_UR.xy, tilec),0,1); \n"
+
+        //"    //TODO: biome cull \n"
+        //"    //TODO: mask cull \n"
+        //"    //TODO: elevation \n"
+
+        //"    if (visible(vertex)) // frustum cull \n"
+        "    { \n"
+        "        uint slot = atomicAdd(cmd[0].instanceCount, 1); \n"
+        "        render[slot] = vertex; \n"
         "    } \n"
         "} \n";
 
@@ -182,7 +246,7 @@ InstanceCloud::InstancingData::needsAllocate() const
 void
 InstanceCloud::InstancingData::allocate(osg::State* state)
 {
-    GLuint numInstances = points->size();
+    GLuint numInstances = points ? points->size() : numX*numY;
     GLuint instanceSize = sizeof(GLfloat)*4;
 
     osg::GLExtensions* ext = state->get<osg::GLExtensions>();
@@ -201,7 +265,7 @@ InstanceCloud::InstancingData::allocate(osg::State* state)
     ext->glBufferStorage(
         GL_SHADER_STORAGE_BUFFER, 
         (numInstances * instanceSize), 
-        points->getDataPointer(), 
+        points ? points->getDataPointer() : NULL,
         0);
 
     // buffer for the output data (culled points, written by compute shader)
@@ -268,12 +332,11 @@ InstanceCloud::computeBoundingBox() const
     return box;
 }
 
-void
-InstanceCloud::cull(osg::RenderInfo& ri)
-{
-    if (_data.points == NULL || _data.points->empty())
-        return;
+const osg::Program::PerContextProgram* lastPCP;
 
+void
+InstanceCloud::bind(osg::RenderInfo& ri)
+{
     osg::State* state = ri.getState();
 
     // allocate GL objects on first run
@@ -281,10 +344,29 @@ InstanceCloud::cull(osg::RenderInfo& ri)
         _data.allocate(state);
 
     // save the last known program so we can restore it after running compute shaders
-    const osg::Program::PerContextProgram* lastPCP = state->getLastAppliedProgramObject();
+    lastPCP = state->getLastAppliedProgramObject();
 
     //activate compute shader
     state->apply(_computeStateSet.get());
+}
+
+void
+InstanceCloud::cull(osg::RenderInfo& ri)
+{
+    //if (_data.points == NULL || _data.points->empty())
+    //    return;
+
+    osg::State* state = ri.getState();
+
+    //// allocate GL objects on first run
+    //if (_data.needsAllocate())
+    //    _data.allocate(state);
+
+    //// save the last known program so we can restore it after running compute shaders
+    //const osg::Program::PerContextProgram* lastPCP = state->getLastAppliedProgramObject();
+
+    ////activate compute shader
+    //state->apply(_computeStateSet.get());
 
     if (state->getUseModelViewAndProjectionUniforms()) 
         state->applyModelViewAndProjectionUniformsIfRequired();
@@ -300,14 +382,19 @@ InstanceCloud::cull(osg::RenderInfo& ri)
     ext->glBindBufferBase(GL_SHADER_STORAGE_BUFFER, BINDING_POINTS_BUFFER, _data.pointsBuffer);
     ext->glBindBufferBase(GL_SHADER_STORAGE_BUFFER, BINDING_RENDER_BUFFER, _data.renderBuffer);
 
-    ext->glDispatchCompute(_data.points->size(), 1, 1);
-    //ext->glDispatchCompute(_data.numX, _data.numY, 1); //_data.points->size(), 1, 1);
+    //ext->glDispatchCompute(_data.points->size(), 1, 1);
+    ext->glDispatchCompute(_data.numX, _data.numY, 1); //_data.points->size(), 1, 1);
 
     ext->glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT | GL_COMMAND_BARRIER_BIT);
 
     // restore previous shader program
+    //state->popStateSet();
+    state->apply();
     if (lastPCP)
+    {
         lastPCP->useProgram();
+        state->setLastAppliedProgramObject(lastPCP);
+    }
 }
 
 void

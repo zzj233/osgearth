@@ -39,6 +39,8 @@ namespace osgEarth
 
         void setPositions(osg::Vec4Array* positions);
 
+        void bind(osg::RenderInfo&);
+
         void cull(osg::RenderInfo&);
 
         void draw(osg::RenderInfo&);
