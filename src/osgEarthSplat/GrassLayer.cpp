@@ -52,8 +52,11 @@ GrassLayer::init()
 {
     GroundCoverLayer::init();
 
-    if (!options().lod().isSet())
-        options().lod().init(19u);
+    // custom alpha discard for grass
+    options().maxAlpha().setDefault(0.75f);
+
+    // custom LOD for grass
+    options().lod().setDefault(19u);
 }
 
 void

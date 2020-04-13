@@ -44,7 +44,8 @@ namespace osgEarth { namespace Splat
             OE_OPTION_LAYER(ImageLayer, colorLayer);
             OE_OPTION(unsigned, lod);
             OE_OPTION(bool, castShadows);
-            OE_OPTION(bool, grass);
+            OE_OPTION(float, maxAlpha);
+            OE_OPTION(bool, alphaToCoverage);
             OE_OPTION_VECTOR(ZoneOptions, zones);
             virtual Config getConfig() const;
         private:
@@ -81,6 +82,16 @@ namespace osgEarth { namespace Splat
         //! Whether the ground cover casts shadows on the terrain
         void setCastShadows(const bool& value);
         const bool& getCastShadows() const;
+
+        //! Transparency threshold below which to discard fragments.
+        //! Only applies when alpha-to-coverage mode is OFF.
+        void setMaxAlpha(float value);
+        float getMaxAlpha() const;
+
+        //! Whether to enable alpha-to-coverage mode.
+        //! Only use this when multisampling it ON
+        void setUseAlphaToCoverage(bool value);
+        bool getUseAlphaToCoverage() const;
 
     protected:
 
@@ -177,6 +188,8 @@ namespace osgEarth { namespace Splat
                 GLint _LLNormalUL;
                 GLint _URNormalUL;
 
+                GLint _A2CUL;
+
                 Renderer* _renderer;
             };
 
@@ -187,6 +200,7 @@ namespace osgEarth { namespace Splat
             unsigned _numInstancesUName;
             unsigned _LLUName, _URUName;
             unsigned _LLNormalUName, _URNormalUName;
+            unsigned _A2CName;
             unsigned _instancedModelUName;
 
             // DrawCallback API
@@ -199,11 +213,10 @@ namespace osgEarth { namespace Splat
 
             Settings _settings;
             GroundCoverLayer* _layer;
+            osg::ref_ptr<osg::StateAttribute> _a2cBlending;
         };
 
         osg::ref_ptr<Renderer> _renderer;
-
-        bool _useCoverageToAlpha;
 
         bool _debug;
         osg::ref_ptr<osg::Drawable> _debugDrawable;

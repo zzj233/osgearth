@@ -56,9 +56,10 @@ uniform vec3 actorPos;
 uniform mat4 osg_ViewMatrix;
 #endif
 
-uniform vec3 oe_Camera;  // (vp width, vp height, lodscale)
+uniform vec3 oe_Camera; // (vp width, vp height, LOD scale)
 
-// Output grass texture coords to the FS
+
+                        // Output grass texture coords to the FS
 out vec2 oe_GroundCover_texCoord;
 
 // Output that selects the land cover texture from the texture array (flat)
@@ -113,6 +114,13 @@ vec3 rgb2hsv(vec3 c)
 const float oe_grass_hue = 80.0; // HSL hue value
 const float oe_grass_hueWidth = 0.27;
 const float oe_grass_saturation = 0.32;
+
+float accel(float x) {
+    return x*x;
+}
+float decel(float x) {
+    return 1.0-(1.0-x)*(1.0-x);
+}
 
 void oe_Grass_VS(inout vec4 vertex)
 {
@@ -193,7 +201,6 @@ void oe_Grass_VS(inout vec4 vertex)
     if (oe_grass_hueWidth < hue_delta) {
         float f = (oe_grass_hueWidth/hue_delta);
         fill *= f*f*f;
-        //fill = 0.0;
     }
     if (hsv[1] < oe_grass_saturation) {
         float f = (hsv[1]/oe_grass_saturation);
@@ -210,8 +217,9 @@ void oe_Grass_VS(inout vec4 vertex)
         // scale the smooth-noise back up to [0..1] and compute an edge factor
         // that will shrink the foliage near the fill boundaries
         oe_noise[NOISE_SMOOTH] /= fill;
-        if (oe_noise[NOISE_SMOOTH] > 0.75)
-            fillEdgeFactor = 1.0-((oe_noise[NOISE_SMOOTH]-0.75)/0.25);
+        const float xx = 0.5;
+        if (oe_noise[NOISE_SMOOTH] > xx)
+            fillEdgeFactor = 1.0-((oe_noise[NOISE_SMOOTH]-xx)/(1.0-xx));
     }
 
     // select a billboard at "random" .. TODO: still order-dependent; needs work
@@ -228,7 +236,7 @@ void oe_Grass_VS(inout vec4 vertex)
     oe_GroundCover_atlasIndex = float(billboard.atlasIndexSide);
 
     // push the falloff closer to the max distance.
-    float falloff = 1.0-pow(nRange, 8.0);
+    float falloff = 1.0-(nRange*nRange*nRange);
 
     // a pseudo-random scale factor to the width and height of a billboard
     //float sizeScale = billboard.sizeVariation * (oe_noise[NOISE_RANDOM_2]*2.0-1.0);
@@ -246,6 +254,8 @@ void oe_Grass_VS(inout vec4 vertex)
 
     vp_Color = vec4(1,1,1,falloff);
 
+    // darken as the fill level decreases
+    vp_Color.rgb *= 0.5+( decel(fillEdgeFactor)*(1.0-0.5) );
 
     // texture coordinate:
     float row = float(which/4);
@@ -254,8 +264,6 @@ void oe_Grass_VS(inout vec4 vertex)
     // random rotation; do this is model space and then transform
     // the vector to view space.
     float a = 6.283185 * fract(oe_noise[NOISE_RANDOM_2]*5.5);
-    //vec2 sincos = vec2(sin(a), cos(a));
-    //vec3 faceVec = gl_NormalMatrix * vec3(dot(vec2(0,1), vec2(sincos.y, -sincos.x)), dot(vec2(0,1), sincos.xy), 0);
     vec3 faceVec = gl_NormalMatrix * vec3(-sin(a), cos(a), 0);
 
     // local frame side vector
@@ -283,20 +291,20 @@ void oe_Grass_VS(inout vec4 vertex)
     vertex.xyz += oe_UpVectorView * height * oe_GroundCover_texCoord.t;
 
     // normal:
-    vp_Normal = mix(-faceVec, oe_UpVectorView, oe_GroundCover_texCoord.t/3.0);
-    
+    vp_Normal = oe_UpVectorView;
+
     // For bending, exaggerate effect as we climb the stalk
     vec3 bendVec = vec3(0.0);
-    float bendPower = pow(oe_GroundCover_texCoord.t, 2.0);
+    float bendPower = pow(3.0*oe_GroundCover_texCoord.t, 2.0);
 
     // effect of gravity:
-    const float gravity = 0.16; // 0=no bend, 1=insane megabend
+    const float gravity = 0.025; // 0=no bend, 1=insane megabend
     bendVec += faceVec * heightRatio * gravity * bendPower;
 
     // wind:
     if (oe_GroundCover_wind > 0.0)
     {
-        float windEffect = oe_GroundCover_wind * heightRatio * bendPower * falloff;
+        float windEffect = oe_GroundCover_wind * heightRatio * bendPower * 0.2 * falloff;
 
 #ifdef OE_GROUNDCOVER_USE_ACTOR
         vec3 windPos = (osg_ViewMatrix * vec4(actorPos, 1)).xyz;
@@ -312,8 +320,6 @@ void oe_Grass_VS(inout vec4 vertex)
         vec2 turbUV = oe_layer_tilec.xy + (1.0-oe_GroundCover_wind)*osg_FrameTime;
         vec2 turb = textureLod(oe_GroundCover_noiseTex, turbUV, 0).xw * 2 - 1;
         bendVec += gl_NormalMatrix * vec3(turb.xy, 0) * windEffect * attenuation;
-
-        //vp_Normal = oe_UpVectorView; //normalize(vp_Normal+oe_UpVectorView*windEffect*2);
 #else
         const vec2 turbFreq = vec2(0.01);
         vec2 turbUV = oe_layer_tilec.xy + turbFreq*osg_FrameTime;
@@ -324,16 +330,6 @@ void oe_Grass_VS(inout vec4 vertex)
 
     vertex.xyz += bendVec;
 
-    // alter the normal based on bend. Idea: don't bother flipping the
-    // normal here, and maybe it looks more realistic...?
-    float dir = (dot(vertex.xyz, vp_Normal) > 0.0)? -1 : +1;
-    vp_Normal += oe_UpVectorView * length(bendVec) * dir;
-
-    // AO:
-    if (row == 0)
-        vp_Color.rgb *= 0.3;
-    else if (row == 1)
-        vp_Color.rgb *= 0.6;
 }
 
 
@@ -346,6 +342,7 @@ $GLSL_DEFAULT_PRECISION_FLOAT
 
 #pragma import_defines(OE_GROUNDCOVER_COLOR_SAMPLER)
 #pragma import_defines(OE_GROUNDCOVER_COLOR_MATRIX)
+
 #ifdef OE_GROUNDCOVER_COLOR_SAMPLER
 uniform sampler2D OE_GROUNDCOVER_COLOR_SAMPLER ;
 uniform mat4 OE_GROUNDCOVER_COLOR_MATRIX ;
@@ -357,6 +354,9 @@ in vec2 oe_GroundCover_texCoord;
 flat in float oe_GroundCover_atlasIndex;
 vec3 vp_Normal;
 
+uniform float oe_GroundCover_maxAlpha;
+uniform int oe_GroundCover_A2C;
+
 void oe_Grass_FS(inout vec4 color)
 {
     if (oe_GroundCover_atlasIndex < 0.0)
@@ -365,12 +365,16 @@ void oe_Grass_FS(inout vec4 color)
     // paint the texture
     color = texture(oe_GroundCover_billboardTex, vec3(oe_GroundCover_texCoord, oe_GroundCover_atlasIndex)) * color;
 
-    if(color.a < 0.15)
+    if (oe_GroundCover_A2C == 1)
+    {
+        // https://medium.com/@bgolus/anti-aliased-alpha-test-the-esoteric-alpha-to-coverage-8b177335ae4f
+        color.a = (color.a - oe_GroundCover_maxAlpha) / max(fwidth(color.a), 0.0001) + 0.5;
+    }
+    else if (color.a < oe_GroundCover_maxAlpha)
+    {
         discard;
+    }
 
-    // support double-sided geometry
-    if (gl_FrontFacing == false)
-        vp_Normal = -vp_Normal;
 
 #ifdef OE_GROUNDCOVER_COLOR_SAMPLER
     const float modulation = 0.75;

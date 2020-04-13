@@ -20,9 +20,16 @@
 * along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
 #include <osgEarth/InstanceCloud>
+
+#if OSG_VERSION_GREATER_OR_EQUAL(3,6,0)
+
 #include <osgEarth/VirtualProgram>
 #include <osg/Program>
 #include <osg/GLExtensions>
+
+#ifndef GL_DYNAMIC_STORAGE_BIT
+#define GL_DYNAMIC_STORAGE_BIT 0x0100
+#endif
 
 using namespace osgEarth;
 
@@ -34,71 +41,6 @@ using namespace osgEarth;
 
 namespace
 {
-
-    //const char* cull_CS = OE_MULTILINE(
-    //    #version 430
-
-    //    layout(local_size_x=1, local_size_y=1, local_size_z=1) in;
-
-    //    struct DrawElementsIndirectCommand {
-    //        uint count;
-    //        uint instanceCount;
-    //        uint firstIndex;
-    //        uint baseVertex;
-    //        uint baseInstance;
-    //    };
-
-    //    layout(std430, binding=0) buffer DrawCommandsBuffer {
-    //        DrawElementsIndirectCommand cmd[];
-    //    };
-
-    //    layout(std430, binding=1) buffer PointsBuffer {
-    //        vec4 points[];
-    //    };
-
-    //    layout(std430, binding=2) buffer RenderBuffer {
-    //        vec4 render[];
-    //    };
-
-    //    bool visible(in vec4 model)
-    //    {
-    //        vec4 clip = gl_ModelViewProjectionMatrix * model;
-    //        clip.xyz = abs(clip.xyz/clip.w);
-    //        const float f = 1.0;
-    //        return clip.x <= f && clip.y <= f && clip.z <= f;
-    //    }
-
-    //    uniform vec2 oe_GroundCover_numInstances;
-    //    uniform vec2 oe_GroundCover_LL, oe_GroundCover_UR;
-
-    //    void main()
-    //    {
-    //        const uint x = gl_GlobalInvocationID.x;
-    //        const uint y = gl_GlobalInvocationID.y;
-
-    //        vec2 dim = oe_GroundCover_numInstances;
-
-    //        vec2 offset = vec2(float(x)/dim, float(y)/dim);
-    //        vec2 halfSpacing = 0.5/dim;
-    //        vec4 tilec = vec4(halfSpacing+offset/dim, 0, 1);
-
-    //        //TODO: noise shift            
-
-    //        vec4 vertex = vec4(mix(oe_GroundCover_LL.xy, oe_GroundCover_UR.xy, tilec.st),0,1);
-
-    //        //TODO: biome cull
-    //        //TODO: mask cull
-    //        //TODO: elevation
-
-    //        // frustum cull:
-    //        if (visible(vertex) {
-    //            uint slot = atomicAdd(cmd[0].instanceCount, 1);
-    //            render[slot] = vertex;
-    //        }
-    //    }
-    //);
-
-#if 0
     const char* cull_CS =
         "#version 430\n"
 
@@ -138,69 +80,6 @@ namespace
         "    { \n"
         "        uint slot = atomicAdd(cmd[0].instanceCount, 1); \n"
         "        render[slot] = points[i]; \n"
-        "    } \n"
-        "} \n";
-#endif
-
-    const char* cull_CS =
-        "#version 430\n"
-
-        "layout(local_size_x=1, local_size_y=1, local_size_z=1) in; \n"
-
-        "struct DrawElementsIndirectCommand { \n"
-        "    uint count; \n"
-        "    uint instanceCount; \n"
-        "    uint firstIndex; \n"
-        "    uint baseVertex; \n"
-        "    uint baseInstance; \n"
-        "}; \n"
-
-        "layout(std430, binding=0) buffer DrawCommandsBuffer { \n"
-        "    DrawElementsIndirectCommand cmd[]; \n"
-        "}; \n"
-
-        "layout(std430, binding=1) buffer PointsBuffer { \n"
-        "    vec4 points[]; \n"
-        "}; \n"
-
-        "layout(std430, binding=2) buffer RenderBuffer { \n"
-        "    vec4 render[]; \n"
-        "}; \n"
-
-        "bool visible(in vec4 model) \n"
-        "{ \n"
-        "    vec4 clip = gl_ModelViewProjectionMatrix * model; \n"
-        "    clip.xyz = abs(clip.xyz/clip.w); \n"
-        "    const float f = 1.0; \n"
-        "    return clip.x <= f && clip.y <= f; \n"
-        "} \n"
-
-        "uniform vec2 oe_GroundCover_numInstances; \n"
-        "uniform vec2 oe_GroundCover_LL; \n"
-        "uniform vec2 oe_GroundCover_UR; \n"
-
-        "void main() { \n"
-        "    const uint x = gl_GlobalInvocationID.x; \n"
-        "    const uint y = gl_GlobalInvocationID.y; \n"
-
-        "    vec2 dim = oe_GroundCover_numInstances; \n"
-
-        "    vec2 offset = vec2(float(x), float(y)); \n"
-        "    vec2 halfSpacing = 0.5/dim; \n"
-        "    vec2 tilec = halfSpacing + offset/dim; \n"
-
-        //"    //TODO: noise shift \n"
-
-        "    vec4 vertex = vec4(mix(oe_GroundCover_LL.xy, oe_GroundCover_UR.xy, tilec),0,1); \n"
-
-        //"    //TODO: biome cull \n"
-        //"    //TODO: mask cull \n"
-        //"    //TODO: elevation \n"
-
-        //"    if (visible(vertex)) // frustum cull \n"
-        "    { \n"
-        "        uint slot = atomicAdd(cmd[0].instanceCount, 1); \n"
-        "        render[slot] = vertex; \n"
         "    } \n"
         "} \n";
 
@@ -246,7 +125,7 @@ InstanceCloud::InstancingData::needsAllocate() const
 void
 InstanceCloud::InstancingData::allocate(osg::State* state)
 {
-    GLuint numInstances = points ? points->size() : numX*numY;
+    GLuint numInstances = points->size();
     GLuint instanceSize = sizeof(GLfloat)*4;
 
     osg::GLExtensions* ext = state->get<osg::GLExtensions>();
@@ -265,7 +144,7 @@ InstanceCloud::InstancingData::allocate(osg::State* state)
     ext->glBufferStorage(
         GL_SHADER_STORAGE_BUFFER, 
         (numInstances * instanceSize), 
-        points ? points->getDataPointer() : NULL,
+        points->getDataPointer(), 
         0);
 
     // buffer for the output data (culled points, written by compute shader)
@@ -332,11 +211,12 @@ InstanceCloud::computeBoundingBox() const
     return box;
 }
 
-const osg::Program::PerContextProgram* lastPCP;
-
 void
-InstanceCloud::bind(osg::RenderInfo& ri)
+InstanceCloud::cull(osg::RenderInfo& ri)
 {
+    if (_data.points == NULL || _data.points->empty())
+        return;
+
     osg::State* state = ri.getState();
 
     // allocate GL objects on first run
@@ -344,29 +224,10 @@ InstanceCloud::bind(osg::RenderInfo& ri)
         _data.allocate(state);
 
     // save the last known program so we can restore it after running compute shaders
-    lastPCP = state->getLastAppliedProgramObject();
+    const osg::Program::PerContextProgram* lastPCP = state->getLastAppliedProgramObject();
 
     //activate compute shader
     state->apply(_computeStateSet.get());
-}
-
-void
-InstanceCloud::cull(osg::RenderInfo& ri)
-{
-    //if (_data.points == NULL || _data.points->empty())
-    //    return;
-
-    osg::State* state = ri.getState();
-
-    //// allocate GL objects on first run
-    //if (_data.needsAllocate())
-    //    _data.allocate(state);
-
-    //// save the last known program so we can restore it after running compute shaders
-    //const osg::Program::PerContextProgram* lastPCP = state->getLastAppliedProgramObject();
-
-    ////activate compute shader
-    //state->apply(_computeStateSet.get());
 
     if (state->getUseModelViewAndProjectionUniforms()) 
         state->applyModelViewAndProjectionUniformsIfRequired();
@@ -382,19 +243,14 @@ InstanceCloud::cull(osg::RenderInfo& ri)
     ext->glBindBufferBase(GL_SHADER_STORAGE_BUFFER, BINDING_POINTS_BUFFER, _data.pointsBuffer);
     ext->glBindBufferBase(GL_SHADER_STORAGE_BUFFER, BINDING_RENDER_BUFFER, _data.renderBuffer);
 
-    //ext->glDispatchCompute(_data.points->size(), 1, 1);
-    ext->glDispatchCompute(_data.numX, _data.numY, 1); //_data.points->size(), 1, 1);
+    ext->glDispatchCompute(_data.points->size(), 1, 1);
+    //ext->glDispatchCompute(_data.numX, _data.numY, 1); //_data.points->size(), 1, 1);
 
     ext->glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT | GL_COMMAND_BARRIER_BIT);
 
     // restore previous shader program
-    //state->popStateSet();
-    state->apply();
     if (lastPCP)
-    {
         lastPCP->useProgram();
-        state->setLastAppliedProgramObject(lastPCP);
-    }
 }
 
 void
@@ -526,3 +382,5 @@ int main(int argc, char** argv)
 }
 
 #endif
+
+#endif // OSG 3.6.0+
