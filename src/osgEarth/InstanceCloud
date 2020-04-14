@@ -34,23 +34,6 @@ namespace osgEarth
     class OSGEARTH_EXPORT InstanceCloud : public osg::Referenced
     {
     public:
-        InstanceCloud();
-
-        void setGeometry(osg::Geometry* geom);
-
-        void setNumInstances(unsigned x, unsigned y);
-
-        void setPositions(osg::Vec4Array* positions);
-
-        void bind(osg::RenderInfo&);
-
-        void cull(osg::RenderInfo&);
-
-        void draw(osg::RenderInfo&);
-
-        osg::BoundingBox computeBoundingBox() const;
-
-    private:
         struct DrawElementsIndirectCommand
         {
             GLuint  count;
@@ -75,6 +58,28 @@ namespace osgEarth
             bool needsAllocate() const;
             void allocate(osg::State* state);
         };
+
+    public:
+        InstanceCloud();
+
+        void setGeometry(osg::Geometry* geom);
+        osg::Geometry* getGeometry() { return _geom.get(); }
+
+        void setNumInstances(unsigned x, unsigned y);
+
+        void setPositions(osg::Vec4Array* positions);
+
+        void cull(osg::RenderInfo&);
+        
+        void cullNoPush(osg::RenderInfo&);
+
+        void draw(osg::RenderInfo&);
+
+        osg::BoundingBox computeBoundingBox() const;
+
+        osg::StateSet* getCullStateSet() const { return _computeStateSet.get(); }
+
+    public:
 
         InstancingData _data;
         osg::ref_ptr<osg::StateSet> _computeStateSet;

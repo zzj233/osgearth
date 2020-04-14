@@ -37,7 +37,7 @@ namespace osgEarth { namespace REX
      * they appear. Since all LayerDrawables share a common bounds, this 
      * should happen automatically, but let's keep an eye out for trouble.
      */
-    class LayerDrawable : public osg::Drawable
+    class LayerDrawable : public osg::Drawable, public PatchLayer::TileBatch
     {
     public:
         LayerDrawable();
@@ -83,6 +83,10 @@ namespace osgEarth { namespace REX
         // All LayerDrawables share the common terrain bounds.
         osg::BoundingSphere computeBound() const { return _drawState->_bs; }
         osg::BoundingBox computeBoundingBox() const { return _drawState->_box; }
+
+    public: // TileBatch
+
+        void drawTiles(osg::RenderInfo& ri) const;
 
     protected:
         // overriden to prevent OSG from releasing GL objects on an attached stateset.

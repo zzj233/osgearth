@@ -131,20 +131,7 @@ void oe_GroundCover_VS(inout vec4 vertex_view)
     // intialize with a "no draw" value (consider using a compute/gs cull instead)
     oe_GroundCover_atlasIndex = -1.0;
 
-    int instanceID;
-    if (oe_GroundCover_instancedModel == 1)
-    {
-        instanceID = gl_InstanceID;
-        modelCoords = gl_MultiTexCoord3.st;
-    }
-    else
-    {
-#ifdef OE_GROUNDCOVER_USE_INSTANCING
-        instanceID = gl_InstanceID;
-#else
-        instanceID = gl_VertexID / 8;
-#endif
-    }
+    int instanceID = gl_InstanceID;
 
     // Generate the UV tile coordinates (tilec) based on the instance number
     vec2 offset = vec2(
@@ -167,7 +154,7 @@ void oe_GroundCover_VS(inout vec4 vertex_view)
     // and place it correctly within the tile
     vec3 pos = gl_NormalMatrix * vec3(mix(oe_GroundCover_LL.xy, oe_GroundCover_UR.xy, oe_layer_tilec.xy), 0);
 
-    vertex_view.xyz += pos;
+    //vertex_view.xyz += pos;
 
     if (oe_GroundCover_instancedModel == 0)
     {
@@ -208,7 +195,7 @@ void oe_GroundCover_VS(inout vec4 vertex_view)
         noise[NOISE_SMOOTH] /= biome.fill;
 
     // Clamp the center point to the elevation.
-    oe_GroundCover_clamp(vertex_view, oe_UpVectorView, oe_layer_tilec.st);
+    //oe_GroundCover_clamp(vertex_view, oe_UpVectorView, oe_layer_tilec.st);
 
     // Calculate the normalized camera range (oe_Camera.z = LOD Scale)
     float maxRange = oe_GroundCover_maxDistance / oe_Camera.z;

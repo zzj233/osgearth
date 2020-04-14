@@ -41,6 +41,48 @@ using namespace osgEarth;
 
 namespace
 {
+    //const char* cull_CS =
+    //    "#version 430\n"
+
+    //    "layout(local_size_x=1, local_size_y=1, local_size_z=1) in; \n"
+
+    //    "struct DrawElementsIndirectCommand { \n"
+    //    "    uint count; \n"
+    //    "    uint instanceCount; \n"
+    //    "    uint firstIndex; \n"
+    //    "    uint baseVertex; \n"
+    //    "    uint baseInstance; \n"
+    //    "}; \n"
+
+    //    "layout(std430, binding=0) buffer DrawCommandsBuffer { \n"
+    //    "    DrawElementsIndirectCommand cmd[]; \n"
+    //    "}; \n"
+
+    //    "layout(std430, binding=1) buffer PointsBuffer { \n"
+    //    "    vec4 points[]; \n"
+    //    "}; \n"
+
+    //    "layout(std430, binding=2) buffer RenderBuffer { \n"
+    //    "    vec4 render[]; \n"
+    //    "}; \n"
+
+    //    "bool visible(in vec4 model) \n"
+    //    "{ \n"
+    //    "    vec4 clip = gl_ModelViewProjectionMatrix * model; \n"
+    //    "    clip.xyz = abs(clip.xyz/clip.w); \n"
+    //    "    const float f = 1.0; \n"
+    //    "    return clip.x <= f && clip.y <= f; \n"
+    //    "} \n"
+
+    //    "void main() { \n"
+    //    "    const uint i = gl_GlobalInvocationID.x; \n"
+    //    "    if (visible(points[i])) // frustum cull \n"
+    //    "    { \n"
+    //    "        uint slot = atomicAdd(cmd[0].instanceCount, 1); \n"
+    //    "        render[slot] = points[i]; \n"
+    //    "    } \n"
+    //    "} \n";
+
     const char* cull_CS =
         "#version 430\n"
 
@@ -74,12 +116,43 @@ namespace
         "    return clip.x <= f && clip.y <= f; \n"
         "} \n"
 
+        "uniform vec2 oe_GroundCover_numInstances; \n"
+        "uniform vec3 oe_GroundCover_LL, oe_GroundCover_UR; \n"
+        "uniform sampler2D oe_GroundCover_noiseTex; \n"
+        "uniform vec2 oe_tile_elevTexelCoeff; \n"
+        "uniform sampler2D oe_tile_elevationTex; \n"
+        "uniform mat4 oe_tile_elevationTexMatrix; \n"
+
         "void main() { \n"
-        "    const uint i = gl_GlobalInvocationID.x; \n"
-        "    if (visible(points[i])) // frustum cull \n"
+        "    const uint x = gl_GlobalInvocationID.x; \n"
+        "    const uint y = gl_GlobalInvocationID.y; \n"
+
+        "    vec2 offset = vec2(float(x), float(y)); \n"
+
+        "    vec2 halfSpacing = 0.5 / oe_GroundCover_numInstances; \n"
+        "    vec2 tilec = halfSpacing + offset / oe_GroundCover_numInstances; \n"
+
+        "    vec4 noise = textureLod(oe_GroundCover_noiseTex, tilec, 0); \n"
+
+        "    vec2 shift = vec2(fract(noise[1]*1.5), fract(noise[2]*1.5))*2.0-1.0; \n"
+
+        "    tilec += shift * halfSpacing; \n"
+
+        "    vec4 vertex = vec4(mix(oe_GroundCover_LL.xy, oe_GroundCover_UR.xy, tilec), 0, 1); \n"
+        
+        "    vec2 elevc = tilec \n"
+        "       * oe_tile_elevTexelCoeff.x * oe_tile_elevationTexMatrix[0][0]     // scale \n"
+        "       + oe_tile_elevTexelCoeff.x * oe_tile_elevationTexMatrix[3].st     // bias \n"
+        "       + oe_tile_elevTexelCoeff.y; \n"
+
+        "    float elev = texture(oe_tile_elevationTex, elevc).r; \n"
+
+        "    vertex.z += elev; \n"
+
+        "    if (visible(vertex)) // frustum cull \n"
         "    { \n"
         "        uint slot = atomicAdd(cmd[0].instanceCount, 1); \n"
-        "        render[slot] = points[i]; \n"
+        "        render[slot] = vertex; \n"
         "    } \n"
         "} \n";
 
@@ -125,7 +198,7 @@ InstanceCloud::InstancingData::needsAllocate() const
 void
 InstanceCloud::InstancingData::allocate(osg::State* state)
 {
-    GLuint numInstances = points->size();
+    GLuint numInstances = points ? points->size() : numX*numY;
     GLuint instanceSize = sizeof(GLfloat)*4;
 
     osg::GLExtensions* ext = state->get<osg::GLExtensions>();
@@ -144,7 +217,7 @@ InstanceCloud::InstancingData::allocate(osg::State* state)
     ext->glBufferStorage(
         GL_SHADER_STORAGE_BUFFER, 
         (numInstances * instanceSize), 
-        points->getDataPointer(), 
+        points ? points->getDataPointer() : NULL,
         0);
 
     // buffer for the output data (culled points, written by compute shader)
@@ -251,6 +324,44 @@ InstanceCloud::cull(osg::RenderInfo& ri)
     // restore previous shader program
     if (lastPCP)
         lastPCP->useProgram();
+}
+
+void
+InstanceCloud::cullNoPush(osg::RenderInfo& ri)
+{
+    osg::State* state = ri.getState();
+
+    // allocate GL objects on first run
+    if (_data.needsAllocate())
+        _data.allocate(state);
+
+    //// save the last known program so we can restore it after running compute shaders
+    //const osg::Program::PerContextProgram* lastPCP = state->getLastAppliedProgramObject();
+
+    ////activate compute shader
+    //state->apply(_computeStateSet.get());
+
+    if (state->getUseModelViewAndProjectionUniforms()) 
+        state->applyModelViewAndProjectionUniformsIfRequired();
+
+    osg::GLExtensions* ext = state->get<osg::GLExtensions>();
+
+    // Clear out the instance count:
+    ext->glBindBuffer(GL_SHADER_STORAGE_BUFFER, _data.commandBuffer);
+    ext->glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, sizeof(DrawElementsIndirectCommand), &_data.command);
+    //ext->glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0); // necessary?
+
+    ext->glBindBufferBase(GL_SHADER_STORAGE_BUFFER, BINDING_COMMAND_BUFFER, _data.commandBuffer);
+    ext->glBindBufferBase(GL_SHADER_STORAGE_BUFFER, BINDING_POINTS_BUFFER, _data.pointsBuffer);
+    ext->glBindBufferBase(GL_SHADER_STORAGE_BUFFER, BINDING_RENDER_BUFFER, _data.renderBuffer);
+
+    ext->glDispatchCompute(_data.numX, _data.numY, 1);
+
+    ext->glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT | GL_COMMAND_BARRIER_BIT);
+
+    // restore previous shader program
+    //if (lastPCP)
+    //    lastPCP->useProgram();
 }
 
 void

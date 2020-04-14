@@ -125,12 +125,12 @@ DrawTileCommand::draw(osg::RenderInfo& ri, DrawState& dsMaster, osg::Referenced*
 
     if (_drawCallback)
     {
-        PatchLayer::DrawContext dc;
+        PatchLayer::DrawContext tile;
 
-        dc._key = _key;
-        dc._range = _range;
-        dc._geom = _geom.get();
-        _drawCallback->draw(ri, dc, layerData);
+        tile._key = _key;
+        tile._range = _range;
+        tile._geom = _geom.get();
+        _drawCallback->drawTile(ri, tile);
     }
 
     else
