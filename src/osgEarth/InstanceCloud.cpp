@@ -94,15 +94,16 @@ namespace
         "    uint firstIndex; \n"
         "    uint baseVertex; \n"
         "    uint baseInstance; \n"
+        "    uint padding[3]; \n"
         "}; \n"
 
         "layout(std430, binding=0) buffer DrawCommandsBuffer { \n"
         "    DrawElementsIndirectCommand cmd[]; \n"
         "}; \n"
 
-        "layout(std430, binding=1) buffer PointsBuffer { \n"
-        "    vec4 points[]; \n"
-        "}; \n"
+        //"layout(std430, binding=1) buffer PointsBuffer { \n"
+        //"    vec4 points[]; \n"
+        //"}; \n"
 
         "layout(std430, binding=2) buffer RenderBuffer { \n"
         "    vec4 render[]; \n"
@@ -116,12 +117,13 @@ namespace
         "    return clip.x <= f && clip.y <= f; \n"
         "} \n"
 
-        "uniform vec2 oe_GroundCover_numInstances; \n"
+        //"uniform vec2 oe_GroundCover_numInstances; \n"
         "uniform vec3 oe_GroundCover_LL, oe_GroundCover_UR; \n"
         "uniform sampler2D oe_GroundCover_noiseTex; \n"
         "uniform vec2 oe_tile_elevTexelCoeff; \n"
         "uniform sampler2D oe_tile_elevationTex; \n"
         "uniform mat4 oe_tile_elevationTexMatrix; \n"
+        "uniform uint oe_GroundCover_tileNum; \n"
 
         "void main() { \n"
         "    const uint x = gl_GlobalInvocationID.x; \n"
@@ -129,8 +131,8 @@ namespace
 
         "    vec2 offset = vec2(float(x), float(y)); \n"
 
-        "    vec2 halfSpacing = 0.5 / oe_GroundCover_numInstances; \n"
-        "    vec2 tilec = halfSpacing + offset / oe_GroundCover_numInstances; \n"
+        "    vec2 halfSpacing = 0.5 / vec2(gl_NumWorkGroups.xy); \n"
+        "    vec2 tilec = halfSpacing + offset / vec2(gl_NumWorkGroups.xy); \n"
 
         "    vec4 noise = textureLod(oe_GroundCover_noiseTex, tilec, 0); \n"
 
@@ -149,23 +151,27 @@ namespace
 
         "    vertex.z += elev; \n"
 
-        "    if (visible(vertex)) // frustum cull \n"
+        //"    if (visible(vertex)) // frustum cull \n"
         "    { \n"
-        "        uint slot = atomicAdd(cmd[0].instanceCount, 1); \n"
-        "        render[slot] = vertex; \n"
+        "        uint slot = atomicAdd(cmd[oe_GroundCover_tileNum].instanceCount, 1); \n"
+        "        uint start = oe_GroundCover_tileNum * gl_NumWorkGroups.x * gl_NumWorkGroups.y; \n"
+        "        render[start + slot] = vertex; \n"
         "    } \n"
         "} \n";
 
-    const char* oe_IC_renderVS =
-        "#version 430 \n"
+    //const char* oe_IC_renderVS =
+    //    "#version 430 \n"
+    //    "uniform uint oe_GroundCover_tileNum; \n"
+    //    "uniform float oe_GroundCover_numInstances; \n"
 
-        "layout(std430, binding=2) buffer RenderBuffer { \n"
-        "    vec4 render[]; \n"
-        "}; \n"
+    //    "layout(std430, binding=2) buffer RenderBuffer { \n"
+    //    "    vec4 render[]; \n"
+    //    "}; \n"
 
-        "void oe_IC_renderVS(inout vec4 vertex) { \n"
-        "    vertex.xyz += render[gl_InstanceID].xyz; \n"
-        "} \n";
+    //    "void oe_IC_renderVS(inout vec4 vertex) { \n"
+    //    "    uint start = oe_GroundCover_tileNum * uint(oe_GroundCover_numInstances.x * uint(oe_GroundCover_numInstances.y); \n"
+    //    "    vertex.xyz += render[start + gl_InstanceID].xyz; \n"
+    //    "} \n";
 }
 
 //...................................................................
@@ -181,6 +187,7 @@ InstanceCloud::DrawElementsIndirectCommand::DrawElementsIndirectCommand() :
 }
 
 InstanceCloud::InstancingData::InstancingData() :
+    commands(NULL),
     points(NULL),
     commandBuffer(-1),
     pointsBuffer(-1),
@@ -189,15 +196,30 @@ InstanceCloud::InstancingData::InstancingData() :
     //nop
 }
 
-bool
-InstanceCloud::InstancingData::needsAllocate() const
+InstanceCloud::InstancingData::~InstancingData()
 {
+    if (commands)
+        delete [] commands;
+}
+
+bool
+InstanceCloud::InstancingData::needsAllocate(unsigned numTiles) const
+{
+    // TODO: reallocation if we need more space!!
     return commandBuffer == -1;
 }
 
 void
-InstanceCloud::InstancingData::allocate(osg::State* state)
+InstanceCloud::InstancingData::allocate(osg::State* state, unsigned numTiles)
 {
+    numTilesAllocated = numTiles;
+
+    if (commands)
+        delete[] commands;
+    commands = new DrawElementsIndirectCommand[numTilesAllocated];
+    for(unsigned i=0; i<numTilesAllocated; ++i)
+        commands[i].count = numIndices;
+
     GLuint numInstances = points ? points->size() : numX*numY;
     GLuint instanceSize = sizeof(GLfloat)*4;
 
@@ -207,16 +229,17 @@ InstanceCloud::InstancingData::allocate(osg::State* state)
     ext->glBindBuffer(GL_SHADER_STORAGE_BUFFER, commandBuffer);
     ext->glBufferStorage(
         GL_SHADER_STORAGE_BUFFER,
-        1 * sizeof(DrawElementsIndirectCommand),
-        &command,
+        numTilesAllocated * sizeof(DrawElementsIndirectCommand),
+        &commands,
         GL_DYNAMIC_STORAGE_BIT);
 
     // buffer for the input data:
+    renderBufferTileSize = numInstances*instanceSize;
     ext->glGenBuffers(1, &pointsBuffer);
     ext->glBindBuffer(GL_SHADER_STORAGE_BUFFER, pointsBuffer);
     ext->glBufferStorage(
         GL_SHADER_STORAGE_BUFFER, 
-        (numInstances * instanceSize), 
+        numTilesAllocated * renderBufferTileSize,
         points ? points->getDataPointer() : NULL,
         0);
 
@@ -225,7 +248,7 @@ InstanceCloud::InstancingData::allocate(osg::State* state)
     ext->glBindBuffer(GL_SHADER_STORAGE_BUFFER, renderBuffer);
     ext->glBufferStorage(
         GL_SHADER_STORAGE_BUFFER, 
-        (numInstances * instanceSize), 
+        numTilesAllocated * (numInstances * instanceSize), 
         NULL, 
         0);
 }
@@ -293,8 +316,8 @@ InstanceCloud::cull(osg::RenderInfo& ri)
     osg::State* state = ri.getState();
 
     // allocate GL objects on first run
-    if (_data.needsAllocate())
-        _data.allocate(state);
+    if (_data.needsAllocate(1u))
+        _data.allocate(state, 1u);
 
     // save the last known program so we can restore it after running compute shaders
     const osg::Program::PerContextProgram* lastPCP = state->getLastAppliedProgramObject();
@@ -309,7 +332,7 @@ InstanceCloud::cull(osg::RenderInfo& ri)
 
     // Clear out the instance count:
     ext->glBindBuffer(GL_SHADER_STORAGE_BUFFER, _data.commandBuffer);
-    ext->glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, sizeof(DrawElementsIndirectCommand), &_data.command);
+    ext->glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, _data.numTilesToDraw*sizeof(DrawElementsIndirectCommand), &_data.commands[0]);
     //ext->glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0); // necessary?
 
     ext->glBindBufferBase(GL_SHADER_STORAGE_BUFFER, BINDING_COMMAND_BUFFER, _data.commandBuffer);
@@ -327,13 +350,43 @@ InstanceCloud::cull(osg::RenderInfo& ri)
 }
 
 void
-InstanceCloud::cullNoPush(osg::RenderInfo& ri)
+InstanceCloud::allocateGLObjects(osg::RenderInfo& ri, unsigned numTiles)
+{
+    // allocate GL objects on first run
+    if (_data.needsAllocate(numTiles))
+    {
+        _data.allocate(ri.getState(), numTiles);
+    }
+
+    _data.numTilesToDraw = numTiles;
+}
+
+void
+InstanceCloud::preCull(osg::RenderInfo& ri)
 {
     osg::State* state = ri.getState();
+    osg::GLExtensions* ext = state->get<osg::GLExtensions>();
 
-    // allocate GL objects on first run
-    if (_data.needsAllocate())
-        _data.allocate(state);
+    if (state->getUseModelViewAndProjectionUniforms()) 
+        state->applyModelViewAndProjectionUniformsIfRequired();
+
+    // Reset all the instance counts:
+    ext->glBindBuffer(GL_SHADER_STORAGE_BUFFER, _data.commandBuffer);
+    ext->glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, _data.numTilesToDraw*sizeof(DrawElementsIndirectCommand), &_data.commands[0]);
+
+    //ext->glBindBufferRange(GL_SHADER_STORAGE_BUFFER, BINDING_COMMAND_BUFFER, _data.commandBuffer, _data.tileToDraw*sizeof(DrawElementsIndirectCommand), sizeof(DrawElementsIndirectCommand));
+
+    ext->glBindBufferBase(GL_SHADER_STORAGE_BUFFER, BINDING_COMMAND_BUFFER, _data.commandBuffer);
+
+    //ext->glBindBufferRange(GL_SHADER_STORAGE_BUFFER, BINDING_RENDER_BUFFER, _data.renderBuffer, _data.tileToDraw*_data.numX*_data.numY*sizeof(float)*4, _data.numX*_data.numY*sizeof(float)*4);
+
+    ext->glBindBufferBase(GL_SHADER_STORAGE_BUFFER, BINDING_RENDER_BUFFER, _data.renderBuffer);
+}
+
+void
+InstanceCloud::cullTile(osg::RenderInfo& ri, unsigned tileNum)
+{
+    osg::State* state = ri.getState();
 
     //// save the last known program so we can restore it after running compute shaders
     //const osg::Program::PerContextProgram* lastPCP = state->getLastAppliedProgramObject();
@@ -341,23 +394,21 @@ InstanceCloud::cullNoPush(osg::RenderInfo& ri)
     ////activate compute shader
     //state->apply(_computeStateSet.get());
 
-    if (state->getUseModelViewAndProjectionUniforms()) 
-        state->applyModelViewAndProjectionUniformsIfRequired();
-
     osg::GLExtensions* ext = state->get<osg::GLExtensions>();
 
-    // Clear out the instance count:
-    ext->glBindBuffer(GL_SHADER_STORAGE_BUFFER, _data.commandBuffer);
-    ext->glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, sizeof(DrawElementsIndirectCommand), &_data.command);
+    // Clear out the instance counts:
+    //ext->glBindBuffer(GL_SHADER_STORAGE_BUFFER, _data.commandBuffer);
+    //ext->glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, _data.numTiles*sizeof(DrawElementsIndirectCommand), &_data.commands[0]);
     //ext->glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0); // necessary?
 
-    ext->glBindBufferBase(GL_SHADER_STORAGE_BUFFER, BINDING_COMMAND_BUFFER, _data.commandBuffer);
-    ext->glBindBufferBase(GL_SHADER_STORAGE_BUFFER, BINDING_POINTS_BUFFER, _data.pointsBuffer);
-    ext->glBindBufferBase(GL_SHADER_STORAGE_BUFFER, BINDING_RENDER_BUFFER, _data.renderBuffer);
+    //ext->glBindBufferBase(GL_SHADER_STORAGE_BUFFER, BINDING_COMMAND_BUFFER, _data.commandBuffer);
+    //ext->glBindBufferBase(GL_SHADER_STORAGE_BUFFER, BINDING_POINTS_BUFFER, _data.pointsBuffer);
+    //ext->glBindBufferBase(GL_SHADER_STORAGE_BUFFER, BINDING_RENDER_BUFFER, _data.renderBuffer);
+
+    //ext->glBindBufferRange(GL_SHADER_STORAGE_BUFFER, BINDING_RENDER_BUFFER, _data.renderBuffer, tileNum*_data.renderBufferTileSize, _data.renderBufferTileSize);
 
     ext->glDispatchCompute(_data.numX, _data.numY, 1);
 
-    ext->glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT | GL_COMMAND_BARRIER_BIT);
 
     // restore previous shader program
     //if (lastPCP)
@@ -365,8 +416,17 @@ InstanceCloud::cullNoPush(osg::RenderInfo& ri)
 }
 
 void
-InstanceCloud::draw(osg::RenderInfo& ri) 
+InstanceCloud::postCull(osg::RenderInfo& ri)
 {
+    osg::State* state = ri.getState();
+    osg::GLExtensions* ext = state->get<osg::GLExtensions>();
+    ext->glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT | GL_COMMAND_BARRIER_BIT);
+}
+
+void
+InstanceCloud::drawTile(osg::RenderInfo& ri, unsigned tileNum)
+{
+    _data.tileToDraw = tileNum;
     _geom->draw(ri);
 }
 
@@ -394,13 +454,35 @@ InstanceCloud::Renderer::drawImplementation(osg::RenderInfo& ri, const osg::Draw
     osg::GLBufferObject* ebo = geom->getPrimitiveSet(0)->getOrCreateGLBufferObject(state.getContextID());
     state.getCurrentVertexArrayState()->bindElementBufferObject(ebo);
 
-    ext->glBindBufferBase(GL_SHADER_STORAGE_BUFFER, BINDING_RENDER_BUFFER, _data->renderBuffer);
+
+    //ext->glBindBuffer(GL_SHADER_STORAGE_BUFFER, _data->commandBuffer);
+    //GLint size;
+    //ext->glGetBufferParameteriv(GL_SHADER_STORAGE_BUFFER, 0x8764, (GLint*)&size);
+    //OE_WARN << "S="<<sizeof(DrawElementsIndirectCommand)<<", BS="<<size<<", offset+size="<< _data->tileToDraw*sizeof(DrawElementsIndirectCommand)+sizeof(DrawElementsIndirectCommand)<< std::endl;
+
+    ext->glBindBufferRange(
+        GL_SHADER_STORAGE_BUFFER, 
+        BINDING_COMMAND_BUFFER, 
+        _data->commandBuffer, 
+        _data->tileToDraw * sizeof(DrawElementsIndirectCommand),
+        sizeof(DrawElementsIndirectCommand));
+
+    ext->glBindBufferRange(
+        GL_SHADER_STORAGE_BUFFER, 
+        BINDING_RENDER_BUFFER,
+        _data->renderBuffer, 
+        _data->tileToDraw * _data->renderBufferTileSize, 
+        _data->renderBufferTileSize);
+
+//    ext->glBindBufferBase(GL_SHADER_STORAGE_BUFFER, BINDING_RENDER_BUFFER, _data->renderBuffer);
 
     ext->glBindBuffer(GL_DRAW_INDIRECT_BUFFER, _data->commandBuffer);
-    ext->glMultiDrawElementsIndirect(GL_TRIANGLES, GL_UNSIGNED_SHORT, 0, 1, 0);
+
+    ext->glDrawElementsIndirect(GL_TRIANGLES, GL_UNSIGNED_SHORT, NULL);
+
     //ext->glBindBuffer(GL_DRAW_INDIRECT_BUFFER, 0);
 
-    ext->glBindBufferBase(GL_SHADER_STORAGE_BUFFER, BINDING_RENDER_BUFFER, 0);
+    //ext->glBindBufferBase(GL_SHADER_STORAGE_BUFFER, BINDING_RENDER_BUFFER, 0);
 }
 
 
@@ -419,7 +501,8 @@ InstanceCloud::Installer::apply(osg::Drawable& drawable)
     {
         geom->setDrawCallback(_callback.get());
         geom->setCullingActive(false);
-        _data->command.count = geom->getPrimitiveSet(0)->getNumIndices();
+        _data->numIndices = geom->getPrimitiveSet(0)->getNumIndices();
+        //_data->commands.count = geom->getPrimitiveSet(0)->getNumIndices();
     }
 }
 
@@ -431,7 +514,7 @@ InstanceCloudDrawable::InstanceCloudDrawable()
     _cloud = new InstanceCloud();
 
     VirtualProgram* vp = VirtualProgram::getOrCreate(getOrCreateStateSet());
-    vp->setFunction("oe_IC_renderVS", oe_IC_renderVS, ShaderComp::LOCATION_VERTEX_MODEL, -FLT_MAX);
+    //vp->setFunction("oe_IC_renderVS", oe_IC_renderVS, ShaderComp::LOCATION_VERTEX_MODEL, -FLT_MAX);
 }
 
 osg::BoundingBox
@@ -444,7 +527,7 @@ void
 InstanceCloudDrawable::drawImplementation(osg::RenderInfo& ri) const
 {
     _cloud->cull(ri);
-    _cloud->draw(ri);
+    _cloud->drawTile(ri, 0u);
 }
 
 #if 0

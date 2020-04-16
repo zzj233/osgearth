@@ -145,14 +145,14 @@ void oe_GroundCover_VS(inout vec4 vertex_view)
     oe_layer_tilec = vec4(halfSpacing + offset / oe_GroundCover_numInstances, 0, 1);
 
     vec4 noise = textureLod(oe_GroundCover_noiseTex, oe_layer_tilec.st, 0);
-
+    
     // randomly shift each point off center
     vec2 shift = vec2(fract(noise[NOISE_RANDOM]*1.5), fract(noise[NOISE_RANDOM_2]*1.5))*2.0-1.0;
 
     oe_layer_tilec.xy += shift * halfSpacing;
 
     // and place it correctly within the tile
-    vec3 pos = gl_NormalMatrix * vec3(mix(oe_GroundCover_LL.xy, oe_GroundCover_UR.xy, oe_layer_tilec.xy), 0);
+    //vec3 pos = gl_NormalMatrix * vec3(mix(oe_GroundCover_LL.xy, oe_GroundCover_UR.xy, oe_layer_tilec.xy), 0);
 
     //vertex_view.xyz += pos;
 

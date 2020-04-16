@@ -178,18 +178,15 @@ namespace osgEarth { namespace Splat
 
                 GLint _A2CUL;
 
-                unsigned _tilesDrawnThisFrame;
+                GLint _tileNumUL;
+
+                unsigned _tileCounter;
             };
 
             // Tracks a GL state to minimize state changes
             struct DrawState
             {
-                //DrawState();
-
-                //void reset(const osg::State*, Settings*);
-
                 // Geometry differs by zone/groundcover settings
-                //typedef UnorderedMap<const void*, osg::ref_ptr<osg::Geometry> > GeomPerGroundCover;
                 typedef UnorderedMap<const void*, osg::ref_ptr<InstanceCloud> > GeomPerGroundCover;
                 GeomPerGroundCover _geom;
 
@@ -207,6 +204,7 @@ namespace osgEarth { namespace Splat
             unsigned _LLUName, _URUName;
             unsigned _LLNormalUName, _URNormalUName;
             unsigned _A2CName;
+            unsigned _tileNumUName;
             unsigned _instancedModelUName;
 
             void applyState(osg::RenderInfo& ri, DrawState& ds); //, Settings* settings);

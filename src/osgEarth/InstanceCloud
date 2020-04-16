@@ -41,22 +41,30 @@ namespace osgEarth
             GLuint  firstIndex;
             GLuint  baseVertex;
             GLuint  baseInstance;
+            GLuint  padding[3]; // pad out to 32 bytes
             DrawElementsIndirectCommand();
         };
 
         struct InstancingData
         {
-            DrawElementsIndirectCommand command;
+            DrawElementsIndirectCommand* commands;
             GLuint commandBuffer;
+            GLsizei commandBufferSize;
             GLuint pointsBuffer;
             GLuint renderBuffer;
+            GLsizei renderBufferTileSize;
             osg::Vec4Array* points;
             unsigned numX, numY;
             osg::ref_ptr<osg::Node> node;
+            unsigned numTilesAllocated;
+            unsigned numIndices;
+            unsigned numTilesToDraw;
+            unsigned tileToDraw;
 
             InstancingData();
-            bool needsAllocate() const;
-            void allocate(osg::State* state);
+            ~InstancingData();
+            bool needsAllocate(unsigned numTiles) const;
+            void allocate(osg::State* state, unsigned numTiles);
         };
 
     public:
@@ -68,12 +76,16 @@ namespace osgEarth
         void setNumInstances(unsigned x, unsigned y);
 
         void setPositions(osg::Vec4Array* positions);
+        
+        void allocateGLObjects(osg::RenderInfo&, unsigned numTiles);
 
         void cull(osg::RenderInfo&);
         
-        void cullNoPush(osg::RenderInfo&);
+        void preCull(osg::RenderInfo&);
+        void cullTile(osg::RenderInfo&, unsigned tileNum);
+        void postCull(osg::RenderInfo&);
 
-        void draw(osg::RenderInfo&);
+        void drawTile(osg::RenderInfo&, unsigned tileNum);
 
         osg::BoundingBox computeBoundingBox() const;
 

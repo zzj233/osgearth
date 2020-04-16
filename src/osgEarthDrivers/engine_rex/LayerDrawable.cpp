@@ -81,18 +81,20 @@ namespace
 void
 LayerDrawable::drawTiles(osg::RenderInfo& ri) const
 {
-    PerContextDrawState& ds = _drawState->getPCDS(ri.getContextID());
+    PerProgramState& ds = _drawState->getPPS(ri);
+    osg::GLExtensions* ext = ri.getState()->get<osg::GLExtensions>();
 
     ds.refresh(ri, _drawState->_bindings);
 
     if (ds._layerUidUL >= 0)
     {
         GLint uid = _layer ? (GLint)_layer->getUID() : (GLint)-1;
-        ds._ext->glUniform1i(ds._layerUidUL, uid);
+        ext->glUniform1i(ds._layerUidUL, uid);
     }
 
     for (DrawTileCommands::const_iterator tile = _tiles.begin(); tile != _tiles.end(); ++tile)
     {
+        _drawState->getPPS(ri).refresh(ri, _drawState->_bindings);
         tile->draw(ri, *_drawState, NULL);
     }
 }

@@ -855,79 +855,12 @@ GroundCoverLayer::Renderer::UniformState::UniformState()
     _LLNormalUL = -1;
     _URNormalUL = -1;
     _A2CUL = -1;
+    _tileNumUL = -1;
     _instancedModelUL = -1;
-    _tilesDrawnThisFrame = 0;
+    _tileCounter = 0;
     _numInstances1D = 0;
     _instancedModelValue = -1;
 }
-
-//void
-//GroundCoverLayer::Renderer::UniformState::reset(const osg::State* state, Settings* settings)
-//{
-//    _tilesDrawnThisFrame = 0;
-//    _LLAppliedValue.set(FLT_MAX, FLT_MAX, FLT_MAX);
-//    _URAppliedValue.set(FLT_MAX, FLT_MAX, FLT_MAX);
-//
-//    // Check for initialization in this zone:
-//    const GroundCover* groundcover = GroundCoverSA::extract(state)->_groundcover;
-//    osg::ref_ptr<InstanceCloud>& geom = _geom[groundcover];
-//
-//    if (!geom.valid())
-//    {
-//        if (groundcover->options().spacing().isSet())
-//        {
-//            float spacing_m = groundcover->options().spacing().get();
-//            _numInstances1D = settings->_tileWidth / spacing_m;
-//        }
-//        else if (groundcover->options().density().isSet())
-//        {
-//            float density_sqkm = groundcover->options().density().get();
-//            _numInstances1D = 0.001 * settings->_tileWidth * sqrt(density_sqkm);
-//        }
-//        else
-//        {
-//            _numInstances1D = 128;
-//        }
-//
-//        geom = new InstanceCloud();
-//        geom->setGeometry(_renderer->_layer->createGeometry(_numInstances1D));
-//        geom->setNumInstances(_numInstances1D, _numInstances1D);
-//    }
-//}
-
-//void
-//GroundCoverLayer::Renderer::DrawState::reset(const osg::State* state, Settings* settings)
-//{
-//    _tilesDrawnThisFrame = 0;
-//    _LLAppliedValue.set(FLT_MAX, FLT_MAX, FLT_MAX);
-//    _URAppliedValue.set(FLT_MAX, FLT_MAX, FLT_MAX);
-//
-//    // Check for initialization in this zone:
-//    const GroundCover* groundcover = GroundCoverSA::extract(state)->_groundcover;
-//    osg::ref_ptr<InstanceCloud>& geom = _geom[groundcover];
-//
-//    if (!geom.valid())
-//    {
-//        if (groundcover->options().spacing().isSet())
-//        {
-//            float spacing_m = groundcover->options().spacing().get();
-//            _numInstances1D = settings->_tileWidth / spacing_m;
-//        }
-//        else if (groundcover->options().density().isSet())
-//        {
-//            float density_sqkm = groundcover->options().density().get();
-//            _numInstances1D = 0.001 * settings->_tileWidth * sqrt(density_sqkm);
-//        }
-//        else
-//        {
-//            _numInstances1D = 128;
-//        }
-//
-//        geom = new InstanceCloud();
-//        geom->setGeometry(_renderer->_layer->createGeometry(_numInstances1D));
-//        geom->setNumInstances(_numInstances1D, _numInstances1D);
-//    }
-//}
 
 GroundCoverLayer::Renderer::Renderer(GroundCoverLayer* layer)
 {
@@ -938,14 +871,26 @@ GroundCoverLayer::Renderer::Renderer(GroundCoverLayer* layer)
     _LLUName = osg::Uniform::getNameID("oe_GroundCover_LL");
     _URUName = osg::Uniform::getNameID("oe_GroundCover_UR");
     _A2CName = osg::Uniform::getNameID("oe_GroundCover_A2C");
+    _tileNumUName = osg::Uniform::getNameID("oe_GroundCover_tileNum");
     _instancedModelUName = osg::Uniform::getNameID("oe_GroundCover_instancedModel");
 
-    _drawStateBuffer.resize(64u);
+    _drawStateBuffer.resize(256u);
 
     _settings._tileWidth = 0.0;
 
     _a2cBlending = new osg::BlendFunc(GL_ONE, GL_ZERO, GL_ONE, GL_ZERO);
 }
+
+class StateEx : public osg::State
+{
+public:
+    StateEx() : State() {}
+    void uniformsGOGO()
+    {
+        UniformMap m = getUniformMap();
+        applyUniformMap(m);
+    }
+};
 
 void
 GroundCoverLayer::Renderer::draw(osg::RenderInfo& ri, const PatchLayer::TileBatch* tiles)
@@ -972,20 +917,31 @@ GroundCoverLayer::Renderer::draw(osg::RenderInfo& ri, const PatchLayer::TileBatc
     // using one SSBO and that doesn't work! Or...if you are ambitious, one SSBO
     // but different sections of it for different tiles....
 
-    state->pushStateSet(geom->getCullStateSet());
-    state->apply();
+    state->apply(_layer->getStateSet());
+    state->apply(geom->getCullStateSet());
+    static_cast<StateEx*>(state)->uniformsGOGO();
+    //state->apply();
 
     applyState(ri, ds);
     _pass = 0;
-    tiles->drawTiles(ri);
 
-    state->popStateSet();
+    const unsigned MAX_NUM_TILES=64u; // TODO!
+    geom->allocateGLObjects(ri, MAX_NUM_TILES);
+
+    geom->preCull(ri);
+    tiles->drawTiles(ri);
+    geom->postCull(ri);
+
+    //state->popStateSet();
     state->apply();
+    static_cast<StateEx*>(state)->uniformsGOGO();
 
     // Then render the tiles using the default shader:
     applyState(ri, ds);
     _pass = 1;
     tiles->drawTiles(ri);
+
+//    state->popStateSet();
 
     // Clean up and finish
 #if OSG_VERSION_GREATER_OR_EQUAL(3,5,6)
@@ -1014,10 +970,11 @@ GroundCoverLayer::Renderer::applyState(osg::RenderInfo& ri, DrawState& ds)
         u._LLUL = pcp->getUniformLocation(_LLUName);
         u._URUL = pcp->getUniformLocation(_URUName);
         u._A2CUL = pcp->getUniformLocation(_A2CName);
+        u._tileNumUL = pcp->getUniformLocation(_tileNumUName);
         u._instancedModelUL = pcp->getUniformLocation(_instancedModelUName);
     }
 
-    u._tilesDrawnThisFrame = 0;
+    u._tileCounter = 0;
     u._LLAppliedValue.set(FLT_MAX, FLT_MAX, FLT_MAX);
     u._URAppliedValue.set(FLT_MAX, FLT_MAX, FLT_MAX);
 
@@ -1025,7 +982,7 @@ GroundCoverLayer::Renderer::applyState(osg::RenderInfo& ri, DrawState& ds)
     const GroundCover* groundcover = GroundCoverSA::extract(ri.getState())->_groundcover;
     osg::ref_ptr<InstanceCloud>& geom = ds._geom[groundcover];
 
-    if (!geom->getGeometry())
+    if (!geom->getGeometry() || u._numInstances1D == 0)
     {
         if (groundcover->options().spacing().isSet())
         {
@@ -1042,31 +999,38 @@ GroundCoverLayer::Renderer::applyState(osg::RenderInfo& ri, DrawState& ds)
             u._numInstances1D = 128;
         }
 
-        //geom = new InstanceCloud();
-        geom->setGeometry(_layer->createGeometry(u._numInstances1D));
-        geom->setNumInstances(u._numInstances1D, u._numInstances1D);
+        if (geom->getGeometry() == NULL)
+        {
+            geom->setGeometry(_layer->createGeometry(u._numInstances1D));
+            geom->setNumInstances(u._numInstances1D, u._numInstances1D);
+        }
     }
 
     // on the first draw call this frame, initialize the uniform that tells the
     // shader the total number of instances:
-    if (u._tilesDrawnThisFrame == 0)
+    if (u._numInstancesUL >= 0)
     {
         osg::Vec2f numInstances(u._numInstances1D, u._numInstances1D);
         ext->glUniform2fv(u._numInstancesUL, 1, numInstances.ptr());
+    }
 
-        GLint multiSamplesOn = ri.getState()->getLastAppliedMode(GL_MULTISAMPLE)?1:0;
-        ri.getState()->applyMode(GL_SAMPLE_ALPHA_TO_COVERAGE_ARB, multiSamplesOn==1);
-        ri.getState()->applyAttribute(_a2cBlending.get());
+    GLint multiSamplesOn = ri.getState()->getLastAppliedMode(GL_MULTISAMPLE) ? 1 : 0;
+    ri.getState()->applyMode(GL_SAMPLE_ALPHA_TO_COVERAGE_ARB, multiSamplesOn == 1);
+    ri.getState()->applyAttribute(_a2cBlending.get());
 
+    if (u._A2CUL >= 0)
+    {
         ext->glUniform1i(u._A2CUL, multiSamplesOn);
+    }
 
 #ifdef TEST_MODEL_INSTANCING
-        const int useInstancedModel = 1;
+    const int useInstancedModel = 1;
 #else
-        const int useInstancedModel = 0;
+    const int useInstancedModel = 0;
 #endif
-        if (u._instancedModelUL >= 0)
-            ext->glUniform1i(u._instancedModelUL, useInstancedModel);
+    if (u._instancedModelUL >= 0)
+    {
+        ext->glUniform1i(u._instancedModelUL, useInstancedModel);
     }
 }
 
@@ -1088,32 +1052,45 @@ GroundCoverLayer::Renderer::drawTile(osg::RenderInfo& ri, const PatchLayer::Draw
 
     UniformState& u = ds._uniforms[pcp];
 
-    // transmit the extents of this tile to the shader, skipping the glUniform
-    // call if the values have not changed. The shader will calculate the
-    // instance positions by interpolating across the tile extents.
-    const osg::BoundingBox& bbox = tile._geom->getBoundingBox();
-
-    const osg::Vec3f& LL = bbox.corner(0);
-    const osg::Vec3f& UR = bbox.corner(3);
-
-    //if (LL != u._LLAppliedValue)
+    // uniform sets the offset into the SSBO holding all the render data
+    if (u._tileNumUL >= 0)
     {
-        ext->glUniform3fv(u._LLUL, 1, LL.ptr());
-        u._LLAppliedValue = LL;
+        ext->glUniform1ui(u._tileNumUL, u._tileCounter);
     }
 
-    //if (UR != u._URAppliedValue)
+    if (u._LLUL >= 0 && u._URUL >= 0)
     {
-        ext->glUniform3fv(u._URUL, 1, UR.ptr());
-        u._URAppliedValue = UR;
+        // transmit the extents of this tile to the shader, skipping the glUniform
+        // call if the values have not changed. The shader will calculate the
+        // instance positions by interpolating across the tile extents.
+        const osg::BoundingBox& bbox = tile._geom->getBoundingBox();
+
+        const osg::Vec3f& LL = bbox.corner(0);
+        const osg::Vec3f& UR = bbox.corner(3);
+
+        //if (LL != u._LLAppliedValue)
+        {
+            ext->glUniform3fv(u._LLUL, 1, LL.ptr());
+            u._LLAppliedValue = LL;
+        }
+
+        //if (UR != u._URAppliedValue)
+        {
+            ext->glUniform3fv(u._URUL, 1, UR.ptr());
+            u._URAppliedValue = UR;
+        }
     }
 
     if (_pass == 0)
-        geom->cullNoPush(ri);
+    {
+        geom->cullTile(ri, u._tileCounter);
+    }
     else
-        geom->draw(ri);
+    {
+        geom->drawTile(ri, u._tileCounter);
+    }
 
-    ++u._tilesDrawnThisFrame;
+    ++u._tileCounter;
 }
 
 void
@@ -1163,14 +1140,19 @@ GroundCoverLayer::loadShaders(VirtualProgram* vp, const osgDB::Options* options)
 
     const char* oe_IC_renderVS =
         "#version 430 \n"
+        //"uniform uint oe_GroundCover_tileNum; \n"
+        //"uniform vec2 oe_GroundCover_numInstances; \n"
 
         "layout(std430, binding=2) buffer RenderBuffer { \n"
         "    vec4 render[]; \n"
         "}; \n"
 
         "void oe_InstanceCloud_renderVS(inout vec4 vertex) { \n"
-        "    vertex.xyz += render[gl_InstanceID].xyz; \n"
+        //"    uint start = oe_GroundCover_tileNum * uint(oe_GroundCover_numInstances.x) * uint(oe_GroundCover_numInstances.y); \n"
+        //"    vertex.xyz += render[start + gl_InstanceID].xyz; \n"
+        "    vertex = render[gl_InstanceID]; \n"
         "} \n";
+
 
     vp->setFunction("oe_InstanceCloud_renderVS", oe_IC_renderVS, ShaderComp::LOCATION_VERTEX_MODEL, -FLT_MAX);
 }
