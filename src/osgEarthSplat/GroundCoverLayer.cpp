@@ -943,10 +943,11 @@ GroundCoverLayer::Renderer::draw(osg::RenderInfo& ri, const PatchLayer::TileBatc
     // using one SSBO and that doesn't work! Or...if you are ambitious, one SSBO
     // but different sections of it for different tiles....
 
+    // WORKS:
     state->pushStateSet(_layer->getStateSet());
     state->pushStateSet(geom->getCullStateSet());
     state->apply();
-    
+
     //state->apply(_layer->getStateSet());
     //state->apply(geom->getCullStateSet());
     //static_cast<StateEx*>(state)->uniformsGOGO();
@@ -963,7 +964,7 @@ GroundCoverLayer::Renderer::draw(osg::RenderInfo& ri, const PatchLayer::TileBatc
 
     state->popStateSet();
     state->apply();
-    static_cast<StateEx*>(state)->uniformsGOGO();
+    //static_cast<StateEx*>(state)->uniformsGOGO();
 
     // Then render the tiles using the default shader:
     applyState(ri, ds);
@@ -1027,6 +1028,8 @@ GroundCoverLayer::Renderer::applyState(osg::RenderInfo& ri, DrawState& ds)
         {
             u._numInstances1D = 128;
         }
+
+        //u._numInstances1D = 16;
 
         if (geom->getGeometry() == NULL)
         {
