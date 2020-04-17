@@ -128,19 +128,19 @@ void oe_Grass_VS(inout vec4 vertex)
     oe_GroundCover_atlasIndex = -1.0;
 
     // input: 16 verts per instance so we can expand into a dual billboard
-    int instanceID = gl_VertexID / 16;
+    //int instanceID = gl_VertexID / 16;
 
     // Generate the UV tile coordinates (oe_layer_tilec) based on the current instance number
-    vec2 numInstances = oe_GroundCover_numInstances;
+    //vec2 numInstances = oe_GroundCover_numInstances;
 
-    vec2 offset = vec2(
-        float(instanceID % int(numInstances.x)),
-        float(instanceID / int(numInstances.y)));
+    //vec2 offset = vec2(
+    //    float(instanceID % int(numInstances.x)),
+    //    float(instanceID / int(numInstances.y)));
 
-    // half the distance between cell centers
-    vec2 halfSpacing = 0.5/numInstances;
+    //// half the distance between cell centers
+    //vec2 halfSpacing = 0.5/numInstances;
 
-    oe_layer_tilec = vec4( halfSpacing + offset/numInstances, 0, 1);
+    //oe_layer_tilec = vec4( halfSpacing + offset/numInstances, 0, 1);
 
     // Sample our noise texture
     oe_noise = textureLod(oe_GroundCover_noiseTex, oe_layer_tilec.st, 0);
@@ -170,7 +170,7 @@ void oe_Grass_VS(inout vec4 vertex)
 #endif
 
     // Clamp the center point to the elevation.
-    vertex.xyz += oe_UpVectorView * oe_terrain_getElevation(oe_layer_tilec.st);
+    //vertex.xyz += oe_UpVectorView * oe_terrain_getElevation(oe_layer_tilec.st);
 
     // Calculate the normalized camera range (oe_Camera.z = LOD Scale)
     float maxRange = oe_GroundCover_maxDistance / oe_Camera.z;

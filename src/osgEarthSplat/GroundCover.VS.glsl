@@ -131,25 +131,25 @@ void oe_GroundCover_VS(inout vec4 vertex_view)
     // intialize with a "no draw" value (consider using a compute/gs cull instead)
     oe_GroundCover_atlasIndex = -1.0;
 
-    int instanceID = gl_InstanceID;
+    //int instanceID = gl_InstanceID;
 
-    // Generate the UV tile coordinates (tilec) based on the instance number
-    vec2 offset = vec2(
-        float(instanceID % int(oe_GroundCover_numInstances.x)),
-        float(instanceID / int(oe_GroundCover_numInstances.y)));
+    //// Generate the UV tile coordinates (tilec) based on the instance number
+    //vec2 offset = vec2(
+    //    float(instanceID % int(oe_GroundCover_numInstances.x)),
+    //    float(instanceID / int(oe_GroundCover_numInstances.y)));
 
-    // half the distance between cell centers
-    vec2 halfSpacing = 0.5 / oe_GroundCover_numInstances;
+    //// half the distance between cell centers
+    //vec2 halfSpacing = 0.5 / oe_GroundCover_numInstances;
 
-    // tile coords [0..1]
-    oe_layer_tilec = vec4(halfSpacing + offset / oe_GroundCover_numInstances, 0, 1);
+    //// tile coords [0..1]
+    //oe_layer_tilec = vec4(halfSpacing + offset / oe_GroundCover_numInstances, 0, 1);
 
     vec4 noise = textureLod(oe_GroundCover_noiseTex, oe_layer_tilec.st, 0);
     
-    // randomly shift each point off center
-    vec2 shift = vec2(fract(noise[NOISE_RANDOM]*1.5), fract(noise[NOISE_RANDOM_2]*1.5))*2.0-1.0;
+    //// randomly shift each point off center
+    //vec2 shift = vec2(fract(noise[NOISE_RANDOM]*1.5), fract(noise[NOISE_RANDOM_2]*1.5))*2.0-1.0;
 
-    oe_layer_tilec.xy += shift * halfSpacing;
+    //oe_layer_tilec.xy += shift * halfSpacing;
 
     // and place it correctly within the tile
     //vec3 pos = gl_NormalMatrix * vec3(mix(oe_GroundCover_LL.xy, oe_GroundCover_UR.xy, oe_layer_tilec.xy), 0);
@@ -169,8 +169,9 @@ void oe_GroundCover_VS(inout vec4 vertex_view)
     int biomeIndex = oe_GroundCover_getBiomeIndex(oe_layer_tilec);
     if ( biomeIndex < 0 )
     {
+        biomeIndex = 0;
         // No biome defined; bail out without emitting any geometry.
-        return;
+        //return;
     }
 
     // If we're using a mask texture, sample it now:

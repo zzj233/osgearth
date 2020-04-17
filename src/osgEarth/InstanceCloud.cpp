@@ -36,8 +36,8 @@ using namespace osgEarth;
 //...................................................................
 
 #define BINDING_COMMAND_BUFFER 0
-#define BINDING_POINTS_BUFFER 1
-#define BINDING_RENDER_BUFFER 2
+#define BINDING_RENDER_BUFFER 1
+#define BINDING_POINTS_BUFFER 2
 
 namespace
 {
@@ -58,11 +58,11 @@ namespace
     //    "    DrawElementsIndirectCommand cmd[]; \n"
     //    "}; \n"
 
-    //    "layout(std430, binding=1) buffer PointsBuffer { \n"
+    //    "layout(std430, binding=2) buffer PointsBuffer { \n"
     //    "    vec4 points[]; \n"
     //    "}; \n"
 
-    //    "layout(std430, binding=2) buffer RenderBuffer { \n"
+    //    "layout(std430, binding=1) buffer RenderBuffer { \n"
     //    "    vec4 render[]; \n"
     //    "}; \n"
 
@@ -94,36 +94,38 @@ namespace
         "    uint firstIndex; \n"
         "    uint baseVertex; \n"
         "    uint baseInstance; \n"
-        "    uint padding[3]; \n"
         "}; \n"
 
-        "layout(std430, binding=0) buffer DrawCommandsBuffer { \n"
+        "layout(binding=0, std430) buffer DrawCommandsBuffer { \n"
         "    DrawElementsIndirectCommand cmd[]; \n"
         "}; \n"
 
-        //"layout(std430, binding=1) buffer PointsBuffer { \n"
-        //"    vec4 points[]; \n"
-        //"}; \n"
-
-        "layout(std430, binding=2) buffer RenderBuffer { \n"
-        "    vec4 render[]; \n"
+        "struct RenderData { \n"
+        "    vec4 vertex; \n"
+        "    vec2 tilec; \n"
+        "    vec2 _padding; \n"
         "}; \n"
 
-        "bool visible(in vec4 model) \n"
+        "layout(binding=1, std430) writeonly buffer RenderBuffer { \n"
+        "    RenderData render[]; \n"
+        "}; \n"
+
+        "bool inFrustum(in vec4 vertex_view) \n"
         "{ \n"
-        "    vec4 clip = gl_ModelViewProjectionMatrix * model; \n"
+        "    vec4 clip = gl_ProjectionMatrix * vertex_view; \n"
         "    clip.xyz = abs(clip.xyz/clip.w); \n"
         "    const float f = 1.0; \n"
         "    return clip.x <= f && clip.y <= f; \n"
         "} \n"
 
-        //"uniform vec2 oe_GroundCover_numInstances; \n"
         "uniform vec3 oe_GroundCover_LL, oe_GroundCover_UR; \n"
         "uniform sampler2D oe_GroundCover_noiseTex; \n"
         "uniform vec2 oe_tile_elevTexelCoeff; \n"
         "uniform sampler2D oe_tile_elevationTex; \n"
         "uniform mat4 oe_tile_elevationTexMatrix; \n"
         "uniform uint oe_GroundCover_tileNum; \n"
+        "uniform float oe_GroundCover_maxDistance; \n"
+        "uniform vec3 oe_Camera; \n"
 
         "void main() { \n"
         "    const uint x = gl_GlobalInvocationID.x; \n"
@@ -151,12 +153,18 @@ namespace
 
         "    vertex.z += elev; \n"
 
-        //"    if (visible(vertex)) // frustum cull \n"
-        "    { \n"
-        "        uint slot = atomicAdd(cmd[oe_GroundCover_tileNum].instanceCount, 1); \n"
-        "        uint start = oe_GroundCover_tileNum * gl_NumWorkGroups.x * gl_NumWorkGroups.y; \n"
-        "        render[start + slot] = vertex; \n"
-        "    } \n"
+        "    float maxRange = oe_GroundCover_maxDistance / oe_Camera.z; \n"
+        "    vec4 vertexView = gl_ModelViewMatrix * vertex; \n"
+        "    if (-vertexView.z > oe_GroundCover_maxDistance) \n"
+        "        return; \n"
+
+        //"    if (!inFrustum(vertexView)) \n"
+        //"        return; \n"
+
+        "    uint slot = atomicAdd(cmd[oe_GroundCover_tileNum].instanceCount, 1); \n"
+        "    uint start = oe_GroundCover_tileNum * gl_NumWorkGroups.y * gl_NumWorkGroups.x; \n"
+        "    render[start + slot].vertex = vertex; \n"
+        "    render[start + slot].tilec = tilec; \n"
         "} \n";
 
     //const char* oe_IC_renderVS =
@@ -175,16 +183,6 @@ namespace
 }
 
 //...................................................................
-
-InstanceCloud::DrawElementsIndirectCommand::DrawElementsIndirectCommand() :
-    count(0),
-    instanceCount(0),
-    firstIndex(0),
-    baseVertex(0),
-    baseInstance(0)
-{
-    //nop
-}
 
 InstanceCloud::InstancingData::InstancingData() :
     commands(NULL),
@@ -218,10 +216,16 @@ InstanceCloud::InstancingData::allocate(osg::State* state, unsigned numTiles)
         delete[] commands;
     commands = new DrawElementsIndirectCommand[numTilesAllocated];
     for(unsigned i=0; i<numTilesAllocated; ++i)
+    {
         commands[i].count = numIndices;
+        commands[i].instanceCount = 0;
+        commands[i].firstIndex = 0;
+        commands[i].baseVertex = 0;
+        commands[i].baseInstance = 0;
+    }
 
-    GLuint numInstances = points ? points->size() : numX*numY;
-    GLuint instanceSize = sizeof(GLfloat)*4;
+    GLuint numInstances = numX * numY;
+    GLuint instanceSize = sizeof(GLfloat)*8; // vec4 vertex; vec2 tilec; vec2 _padding;
 
     osg::GLExtensions* ext = state->get<osg::GLExtensions>();
 
@@ -230,27 +234,33 @@ InstanceCloud::InstancingData::allocate(osg::State* state, unsigned numTiles)
     ext->glBufferStorage(
         GL_SHADER_STORAGE_BUFFER,
         numTilesAllocated * sizeof(DrawElementsIndirectCommand),
-        &commands,
-        GL_DYNAMIC_STORAGE_BIT);
+        NULL,
+        GL_DYNAMIC_STORAGE_BIT); 
+        //&commands[0], // not necessary since we subdata each frame
+        //GL_DYNAMIC_STORAGE_BIT); // so we can reset each frame
 
     // buffer for the input data:
-    renderBufferTileSize = numInstances*instanceSize;
-    ext->glGenBuffers(1, &pointsBuffer);
-    ext->glBindBuffer(GL_SHADER_STORAGE_BUFFER, pointsBuffer);
-    ext->glBufferStorage(
-        GL_SHADER_STORAGE_BUFFER, 
-        numTilesAllocated * renderBufferTileSize,
-        points ? points->getDataPointer() : NULL,
-        0);
+    //ext->glGenBuffers(1, &pointsBuffer);
+    //ext->glBindBuffer(GL_SHADER_STORAGE_BUFFER, pointsBuffer);
+    //ext->glBufferStorage(
+    //    GL_SHADER_STORAGE_BUFFER, 
+    //    ??? numTilesAllocated * renderBufferTileSize,
+    //    points ? points->getDataPointer() : NULL,
+    //    0);
 
     // buffer for the output data (culled points, written by compute shader)
+    renderBufferTileSize = numInstances*instanceSize;
+    //const int ALIGNMENT = 32;
+    //if (renderBufferTileSize%ALIGNMENT > 0)
+    //    renderBufferTileSize += ALIGNMENT-(renderBufferTileSize%ALIGNMENT); // align to XX bytes
+
     ext->glGenBuffers(1, &renderBuffer);
     ext->glBindBuffer(GL_SHADER_STORAGE_BUFFER, renderBuffer);
     ext->glBufferStorage(
         GL_SHADER_STORAGE_BUFFER, 
-        numTilesAllocated * (numInstances * instanceSize), 
-        NULL, 
-        0);
+        numTilesAllocated * renderBufferTileSize,
+        NULL,   // uninitialized memory
+        0);     // only GPU will write to this buffer
 }
 
 InstanceCloud::InstanceCloud()
@@ -310,6 +320,7 @@ InstanceCloud::computeBoundingBox() const
 void
 InstanceCloud::cull(osg::RenderInfo& ri)
 {
+#if 0
     if (_data.points == NULL || _data.points->empty())
         return;
 
@@ -347,6 +358,7 @@ InstanceCloud::cull(osg::RenderInfo& ri)
     // restore previous shader program
     if (lastPCP)
         lastPCP->useProgram();
+#endif
 }
 
 void
@@ -357,8 +369,6 @@ InstanceCloud::allocateGLObjects(osg::RenderInfo& ri, unsigned numTiles)
     {
         _data.allocate(ri.getState(), numTiles);
     }
-
-    _data.numTilesToDraw = numTiles;
 }
 
 void
@@ -370,17 +380,40 @@ InstanceCloud::preCull(osg::RenderInfo& ri)
     if (state->getUseModelViewAndProjectionUniforms()) 
         state->applyModelViewAndProjectionUniformsIfRequired();
 
-    // Reset all the instance counts:
+    // Reset all the instance counts to zero.
     ext->glBindBuffer(GL_SHADER_STORAGE_BUFFER, _data.commandBuffer);
-    ext->glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, _data.numTilesToDraw*sizeof(DrawElementsIndirectCommand), &_data.commands[0]);
+    ext->glBufferSubData(
+        GL_SHADER_STORAGE_BUFFER, 
+        0,
+        _data.numTilesAllocated * sizeof(DrawElementsIndirectCommand),
+        &_data.commands[0]);
 
     //ext->glBindBufferRange(GL_SHADER_STORAGE_BUFFER, BINDING_COMMAND_BUFFER, _data.commandBuffer, _data.tileToDraw*sizeof(DrawElementsIndirectCommand), sizeof(DrawElementsIndirectCommand));
 
     ext->glBindBufferBase(GL_SHADER_STORAGE_BUFFER, BINDING_COMMAND_BUFFER, _data.commandBuffer);
 
-    //ext->glBindBufferRange(GL_SHADER_STORAGE_BUFFER, BINDING_RENDER_BUFFER, _data.renderBuffer, _data.tileToDraw*_data.numX*_data.numY*sizeof(float)*4, _data.numX*_data.numY*sizeof(float)*4);
+    //char* empty = new char[_data.numTilesAllocated * _data.renderBufferTileSize];
+    //memset(empty, 0, _data.numTilesAllocated * _data.renderBufferTileSize);
+    //ext->glBindBuffer(GL_SHADER_STORAGE_BUFFER, _data.renderBuffer);
+    //ext->glBindBufferBase(GL_SHADER_STORAGE_BUFFER, BINDING_RENDER_BUFFER, _data.renderBuffer);
+    //ext->glBufferSubData(
+    //    GL_SHADER_STORAGE_BUFFER, 
+    //    0,
+    //    _data.numTilesAllocated * _data.renderBufferTileSize,
+    //    empty);
+    //delete [] empty;
 
-    ext->glBindBufferBase(GL_SHADER_STORAGE_BUFFER, BINDING_RENDER_BUFFER, _data.renderBuffer);
+    //ext->glBindBufferRange(
+    //    GL_SHADER_STORAGE_BUFFER, 
+    //    BINDING_RENDER_BUFFER,
+    //    _data.renderBuffer, 
+    //    _data.tileToDraw * _data.renderBufferTileSize,
+    //    _data.renderBufferTileSize);
+
+    ext->glBindBufferBase(
+        GL_SHADER_STORAGE_BUFFER, 
+        BINDING_RENDER_BUFFER,
+        _data.renderBuffer);
 }
 
 void
@@ -396,19 +429,19 @@ InstanceCloud::cullTile(osg::RenderInfo& ri, unsigned tileNum)
 
     osg::GLExtensions* ext = state->get<osg::GLExtensions>();
 
-    // Clear out the instance counts:
-    //ext->glBindBuffer(GL_SHADER_STORAGE_BUFFER, _data.commandBuffer);
-    //ext->glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, _data.numTiles*sizeof(DrawElementsIndirectCommand), &_data.commands[0]);
-    //ext->glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0); // necessary?
-
-    //ext->glBindBufferBase(GL_SHADER_STORAGE_BUFFER, BINDING_COMMAND_BUFFER, _data.commandBuffer);
-    //ext->glBindBufferBase(GL_SHADER_STORAGE_BUFFER, BINDING_POINTS_BUFFER, _data.pointsBuffer);
-    //ext->glBindBufferBase(GL_SHADER_STORAGE_BUFFER, BINDING_RENDER_BUFFER, _data.renderBuffer);
-
-    //ext->glBindBufferRange(GL_SHADER_STORAGE_BUFFER, BINDING_RENDER_BUFFER, _data.renderBuffer, tileNum*_data.renderBufferTileSize, _data.renderBufferTileSize);
+    //ext->glBindBufferRange(
+    //    GL_SHADER_STORAGE_BUFFER, 
+    //    BINDING_RENDER_BUFFER,
+    //    _data.renderBuffer, 
+    //    tileNum * _data.renderBufferTileSize,
+    //    _data.renderBufferTileSize);
 
     ext->glDispatchCompute(_data.numX, _data.numY, 1);
 
+    //ext->glDispatchCompute(_data.numX * _data.numY, 1, 1);
+
+    // todo: prob delete this
+    //ext->glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT | GL_COMMAND_BARRIER_BIT);
 
     // restore previous shader program
     //if (lastPCP)
@@ -418,9 +451,9 @@ InstanceCloud::cullTile(osg::RenderInfo& ri, unsigned tileNum)
 void
 InstanceCloud::postCull(osg::RenderInfo& ri)
 {
-    osg::State* state = ri.getState();
-    osg::GLExtensions* ext = state->get<osg::GLExtensions>();
-    ext->glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT | GL_COMMAND_BARRIER_BIT);
+    //osg::State* state = ri.getState();
+    //osg::GLExtensions* ext = state->get<osg::GLExtensions>();
+    //ext->glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT | GL_COMMAND_BARRIER_BIT);
 }
 
 void
@@ -444,41 +477,59 @@ InstanceCloud::Renderer::drawImplementation(osg::RenderInfo& ri, const osg::Draw
 
     osg::GLExtensions* ext = state.get<osg::GLExtensions>();
 
-    osg::VertexArrayState* vas = state.getCurrentVertexArrayState();
-    vas->setVertexBufferObjectSupported(true);
+    if (_data->tileToDraw == 0)
+    {
+        osg::VertexArrayState* vas = state.getCurrentVertexArrayState();
+        vas->setVertexBufferObjectSupported(true);
 
-    const osg::Geometry* geom = drawable->asGeometry();
-    geom->drawVertexArraysImplementation(ri);
+        const osg::Geometry* geom = drawable->asGeometry();
+        geom->drawVertexArraysImplementation(ri);
 
-    // TODO: support multiple primtsets....?
-    osg::GLBufferObject* ebo = geom->getPrimitiveSet(0)->getOrCreateGLBufferObject(state.getContextID());
-    state.getCurrentVertexArrayState()->bindElementBufferObject(ebo);
-
+        // TODO: support multiple primtsets....?
+        osg::GLBufferObject* ebo = geom->getPrimitiveSet(0)->getOrCreateGLBufferObject(state.getContextID());
+        state.getCurrentVertexArrayState()->bindElementBufferObject(ebo);
+    }
 
     //ext->glBindBuffer(GL_SHADER_STORAGE_BUFFER, _data->commandBuffer);
     //GLint size;
     //ext->glGetBufferParameteriv(GL_SHADER_STORAGE_BUFFER, 0x8764, (GLint*)&size);
     //OE_WARN << "S="<<sizeof(DrawElementsIndirectCommand)<<", BS="<<size<<", offset+size="<< _data->tileToDraw*sizeof(DrawElementsIndirectCommand)+sizeof(DrawElementsIndirectCommand)<< std::endl;
 
-    ext->glBindBufferRange(
-        GL_SHADER_STORAGE_BUFFER, 
-        BINDING_COMMAND_BUFFER, 
-        _data->commandBuffer, 
-        _data->tileToDraw * sizeof(DrawElementsIndirectCommand),
-        sizeof(DrawElementsIndirectCommand));
+    //ext->glBindBufferRange(
+    //    GL_SHADER_STORAGE_BUFFER, 
+    //    BINDING_COMMAND_BUFFER, 
+    //    _data->commandBuffer, 
+    //    _data->tileToDraw * sizeof(DrawElementsIndirectCommand),
+    //    sizeof(DrawElementsIndirectCommand));
 
+//    ext->glBindBufferBase(GL_SHADER_STORAGE_BUFFER, BINDING_RENDER_BUFFER, _data->renderBuffer);
+
+    // activate the "nth" tile in the render buffer:
     ext->glBindBufferRange(
         GL_SHADER_STORAGE_BUFFER, 
         BINDING_RENDER_BUFFER,
         _data->renderBuffer, 
-        _data->tileToDraw * _data->renderBufferTileSize, 
+        _data->tileToDraw * _data->renderBufferTileSize,
         _data->renderBufferTileSize);
 
-//    ext->glBindBufferBase(GL_SHADER_STORAGE_BUFFER, BINDING_RENDER_BUFFER, _data->renderBuffer);
+    // first tile only:
+    if (_data->tileToDraw == 0)
+    {
+        ext->glBindBufferBase(
+            GL_SHADER_STORAGE_BUFFER, 
+            BINDING_COMMAND_BUFFER, 
+            _data->commandBuffer);
 
-    ext->glBindBuffer(GL_DRAW_INDIRECT_BUFFER, _data->commandBuffer);
+        ext->glBindBuffer(GL_DRAW_INDIRECT_BUFFER, _data->commandBuffer);
 
-    ext->glDrawElementsIndirect(GL_TRIANGLES, GL_UNSIGNED_SHORT, NULL);
+        ext->glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT | GL_COMMAND_BARRIER_BIT);
+    }
+
+    ext->glDrawElementsIndirect(
+        GL_TRIANGLES, 
+        GL_UNSIGNED_SHORT,
+        (const void*)(_data->tileToDraw * sizeof(DrawElementsIndirectCommand)) );
+        //NULL);
 
     //ext->glBindBuffer(GL_DRAW_INDIRECT_BUFFER, 0);
 
@@ -502,7 +553,6 @@ InstanceCloud::Installer::apply(osg::Drawable& drawable)
         geom->setDrawCallback(_callback.get());
         geom->setCullingActive(false);
         _data->numIndices = geom->getPrimitiveSet(0)->getNumIndices();
-        //_data->commands.count = geom->getPrimitiveSet(0)->getNumIndices();
     }
 }
 

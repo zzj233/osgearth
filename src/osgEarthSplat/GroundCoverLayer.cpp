@@ -591,6 +591,32 @@ GroundCoverLayer::buildStateSets()
 
                 loadShaders(vp, getReadOptions());
 
+                const char* oe_IC_renderVS =
+                    "#version 430 \n"
+                    //"uniform uint oe_GroundCover_tileNum; \n"
+                    //"uniform vec2 oe_GroundCover_numInstances; \n"
+
+                    "struct RenderData { \n"
+                    "    vec4 vertex; \n"
+                    "    vec2 tilec; \n"
+                    "    vec2 _padding; \n"
+                    "}; \n"
+
+                    "layout(binding=1, std430) buffer RenderBuffer { \n"
+                    "    RenderData render[]; \n"
+                    "}; \n"
+
+                    "out vec4 oe_layer_tilec; \n"
+
+                    "void oe_InstanceCloud_renderVS(inout vec4 vertex) { \n"
+                    //"    uint start = oe_GroundCover_tileNum * uint(oe_GroundCover_numInstances.x) * uint(oe_GroundCover_numInstances.y); \n"
+                    //"    vertex.xyz += render[start + gl_InstanceID].xyz; \n"
+                    "    vertex = render[gl_InstanceID].vertex; \n"
+                    "    oe_layer_tilec = vec4(render[gl_InstanceID].tilec, 0, 1); \n"
+                    "} \n";
+
+                vp->setFunction("oe_InstanceCloud_renderVS", oe_IC_renderVS, ShaderComp::LOCATION_VERTEX_MODEL, -FLT_MAX);
+
                 osg::Shader* covTest = groundCover->createPredicateShader(getLandCoverDictionary(), getLandCoverLayer());
                 covTest->setName(covTest->getName() + "_VERTEX");
                 covTest->setType(osg::Shader::VERTEX);
@@ -917,22 +943,25 @@ GroundCoverLayer::Renderer::draw(osg::RenderInfo& ri, const PatchLayer::TileBatc
     // using one SSBO and that doesn't work! Or...if you are ambitious, one SSBO
     // but different sections of it for different tiles....
 
-    state->apply(_layer->getStateSet());
-    state->apply(geom->getCullStateSet());
-    static_cast<StateEx*>(state)->uniformsGOGO();
-    //state->apply();
+    state->pushStateSet(_layer->getStateSet());
+    state->pushStateSet(geom->getCullStateSet());
+    state->apply();
+    
+    //state->apply(_layer->getStateSet());
+    //state->apply(geom->getCullStateSet());
+    //static_cast<StateEx*>(state)->uniformsGOGO();
 
     applyState(ri, ds);
     _pass = 0;
 
-    const unsigned MAX_NUM_TILES=64u; // TODO!
+    const unsigned MAX_NUM_TILES=128u; // TODO!
     geom->allocateGLObjects(ri, MAX_NUM_TILES);
 
     geom->preCull(ri);
     tiles->drawTiles(ri);
     geom->postCull(ri);
 
-    //state->popStateSet();
+    state->popStateSet();
     state->apply();
     static_cast<StateEx*>(state)->uniformsGOGO();
 
@@ -941,7 +970,7 @@ GroundCoverLayer::Renderer::draw(osg::RenderInfo& ri, const PatchLayer::TileBatc
     _pass = 1;
     tiles->drawTiles(ri);
 
-//    state->popStateSet();
+    state->popStateSet();
 
     // Clean up and finish
 #if OSG_VERSION_GREATER_OR_EQUAL(3,5,6)
@@ -1137,22 +1166,4 @@ GroundCoverLayer::loadShaders(VirtualProgram* vp, const osgDB::Options* options)
     GroundCoverShaders shaders;
     shaders.load(vp, shaders.GroundCover_VS, options);
     shaders.load(vp, shaders.GroundCover_FS, options);
-
-    const char* oe_IC_renderVS =
-        "#version 430 \n"
-        //"uniform uint oe_GroundCover_tileNum; \n"
-        //"uniform vec2 oe_GroundCover_numInstances; \n"
-
-        "layout(std430, binding=2) buffer RenderBuffer { \n"
-        "    vec4 render[]; \n"
-        "}; \n"
-
-        "void oe_InstanceCloud_renderVS(inout vec4 vertex) { \n"
-        //"    uint start = oe_GroundCover_tileNum * uint(oe_GroundCover_numInstances.x) * uint(oe_GroundCover_numInstances.y); \n"
-        //"    vertex.xyz += render[start + gl_InstanceID].xyz; \n"
-        "    vertex = render[gl_InstanceID]; \n"
-        "} \n";
-
-
-    vp->setFunction("oe_InstanceCloud_renderVS", oe_IC_renderVS, ShaderComp::LOCATION_VERTEX_MODEL, -FLT_MAX);
 }

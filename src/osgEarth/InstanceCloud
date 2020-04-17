@@ -41,8 +41,6 @@ namespace osgEarth
             GLuint  firstIndex;
             GLuint  baseVertex;
             GLuint  baseInstance;
-            GLuint  padding[3]; // pad out to 32 bytes
-            DrawElementsIndirectCommand();
         };
 
         struct InstancingData
@@ -58,7 +56,6 @@ namespace osgEarth
             osg::ref_ptr<osg::Node> node;
             unsigned numTilesAllocated;
             unsigned numIndices;
-            unsigned numTilesToDraw;
             unsigned tileToDraw;
 
             InstancingData();
