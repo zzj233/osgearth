@@ -60,8 +60,7 @@ namespace osgEarth
 
             InstancingData();
             ~InstancingData();
-            bool needsAllocate(unsigned numTiles) const;
-            void allocate(osg::State* state, unsigned numTiles);
+            void allocateGLObjects(osg::State* state, unsigned numTiles);
         };
 
     public:
@@ -71,12 +70,9 @@ namespace osgEarth
         osg::Geometry* getGeometry() { return _geom.get(); }
 
         void setNumInstances(unsigned x, unsigned y);
-
-        void setPositions(osg::Vec4Array* positions);
         
         void allocateGLObjects(osg::RenderInfo&, unsigned numTiles);
 
-        void cull(osg::RenderInfo&);
         
         void preCull(osg::RenderInfo&);
         void cullTile(osg::RenderInfo&, unsigned tileNum);
@@ -110,7 +106,7 @@ namespace osgEarth
         };
     };
 
-
+#if 0
     class OSGEARTH_EXPORT InstanceCloudDrawable : public osg::Drawable
     {
     public:
@@ -125,6 +121,8 @@ namespace osgEarth
     private:
         osg::ref_ptr<InstanceCloud> _cloud;
     };
+#endif
+
 }
 
 #endif // OSG 3.6+

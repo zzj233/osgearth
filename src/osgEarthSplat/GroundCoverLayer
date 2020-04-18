@@ -42,6 +42,7 @@ namespace osgEarth { namespace Splat
             META_LayerOptions(osgEarth, Options, PatchLayer::Options);
             OE_OPTION_LAYER(ImageLayer, maskLayer);
             OE_OPTION_LAYER(ImageLayer, colorLayer);
+            OE_OPTION(float, colorMinSaturation);
             OE_OPTION(unsigned, lod);
             OE_OPTION(bool, castShadows);
             OE_OPTION(float, maxAlpha);
@@ -159,8 +160,6 @@ namespace osgEarth { namespace Splat
             {
                 UniformState();
 
-                //void reset(const osg::State*, Settings*);
-
                 GLint _numInstancesUL;
                 int _numInstances1D;
 
@@ -207,7 +206,7 @@ namespace osgEarth { namespace Splat
             unsigned _tileNumUName;
             unsigned _instancedModelUName;
 
-            void applyState(osg::RenderInfo& ri, DrawState& ds); //, Settings* settings);
+            void applyLocalState(osg::RenderInfo& ri, DrawState& ds);
 
             // DrawCallback API
             void draw(osg::RenderInfo& ri, const TileBatch* tiles);

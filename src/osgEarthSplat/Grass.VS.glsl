@@ -172,6 +172,7 @@ void oe_Grass_VS(inout vec4 vertex)
     // Clamp the center point to the elevation.
     //vertex.xyz += oe_UpVectorView * oe_terrain_getElevation(oe_layer_tilec.st);
 
+#if 1
     // Calculate the normalized camera range (oe_Camera.z = LOD Scale)
     float maxRange = oe_GroundCover_maxDistance / oe_Camera.z;
     float zv = vertex.z;
@@ -180,6 +181,9 @@ void oe_Grass_VS(inout vec4 vertex)
     // Distance culling:
     if ( nRange == 1.0 )
         return;
+#else
+    float nRange = 0.0;
+#endif
 
     // look up biome:
     oe_GroundCover_Biome biome;
@@ -245,7 +249,7 @@ void oe_Grass_VS(inout vec4 vertex)
     float width = (billboard.width + billboard.width*sizeScale) * clamp(fillEdgeFactor*2,0,1);
 
     // need abs here but not sure why... todo
-    float height = abs((billboard.height + billboard.height*sizeScale) * fillEdgeFactor);
+    float height = abs((billboard.height + billboard.height*sizeScale) * fillEdgeFactor) * falloff;
 
     // ratio of adjusted height to nonimal height
     float heightRatio = height/billboard.height;
@@ -359,8 +363,8 @@ uniform int oe_GroundCover_A2C;
 
 void oe_Grass_FS(inout vec4 color)
 {
-    if (oe_GroundCover_atlasIndex < 0.0)
-        discard;
+    //if (oe_GroundCover_atlasIndex < 0.0)
+    //    discard;
 
     // paint the texture
     color = texture(oe_GroundCover_billboardTex, vec3(oe_GroundCover_texCoord, oe_GroundCover_atlasIndex)) * color;

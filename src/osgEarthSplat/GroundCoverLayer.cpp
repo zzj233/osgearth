@@ -78,6 +78,7 @@ GroundCoverLayer::Options::getConfig() const
     Config conf = PatchLayer::Options::getConfig();
     maskLayer().set(conf, "mask_layer");
     colorLayer().set(conf, "color_layer");
+    conf.set("color_min_saturation", colorMinSaturation());
     conf.set("lod", _lod);
     conf.set("cast_shadows", _castShadows);
     conf.set("max_alpha", maxAlpha());
@@ -105,6 +106,7 @@ GroundCoverLayer::Options::fromConfig(const Config& conf)
 
     maskLayer().get(conf, "mask_layer");
     colorLayer().get(conf, "color_layer");
+    conf.get("color_min_saturation", colorMinSaturation());
     conf.get("lod", _lod);
     conf.get("cast_shadows", _castShadows);
     conf.get("max_alpha", maxAlpha());
@@ -523,6 +525,7 @@ GroundCoverLayer::buildStateSets()
     {
         stateset->setDefine("OE_GROUNDCOVER_COLOR_SAMPLER", getColorLayer()->getSharedTextureUniformName());
         stateset->setDefine("OE_GROUNDCOVER_COLOR_MATRIX", getColorLayer()->getSharedTextureMatrixUniformName());
+        stateset->addUniform(new osg::Uniform("oe_GroundCover_colorMinSaturation", options().colorMinSaturation().get()));
     }
 
     // disable backface culling to support shadow/depth cameras,
@@ -593,8 +596,6 @@ GroundCoverLayer::buildStateSets()
 
                 const char* oe_IC_renderVS =
                     "#version 430 \n"
-                    //"uniform uint oe_GroundCover_tileNum; \n"
-                    //"uniform vec2 oe_GroundCover_numInstances; \n"
 
                     "struct RenderData { \n"
                     "    vec4 vertex; \n"
@@ -609,8 +610,6 @@ GroundCoverLayer::buildStateSets()
                     "out vec4 oe_layer_tilec; \n"
 
                     "void oe_InstanceCloud_renderVS(inout vec4 vertex) { \n"
-                    //"    uint start = oe_GroundCover_tileNum * uint(oe_GroundCover_numInstances.x) * uint(oe_GroundCover_numInstances.y); \n"
-                    //"    vertex.xyz += render[start + gl_InstanceID].xyz; \n"
                     "    vertex = render[gl_InstanceID].vertex; \n"
                     "    oe_layer_tilec = vec4(render[gl_InstanceID].tilec, 0, 1); \n"
                     "} \n";
@@ -938,36 +937,26 @@ GroundCoverLayer::Renderer::draw(osg::RenderInfo& ri, const PatchLayer::TileBatc
         geom = new InstanceCloud();
     }
 
-    //TODO: 4/14/20
-    // This sort of works, but we need to have an SSBO per-tile. Right now it's
-    // using one SSBO and that doesn't work! Or...if you are ambitious, one SSBO
-    // but different sections of it for different tiles....
-
-    // WORKS:
+    // I'm not sure why we have to push the layer's stateset here.
+    // It should have bee applied already in the render bin.
+    // I am missing something. -gw 4/20/20
     state->pushStateSet(_layer->getStateSet());
-    state->pushStateSet(geom->getCullStateSet());
-    state->apply();
 
-    //state->apply(_layer->getStateSet());
-    //state->apply(geom->getCullStateSet());
-    //static_cast<StateEx*>(state)->uniformsGOGO();
+    state->apply(geom->getCullStateSet());
 
-    applyState(ri, ds);
+    applyLocalState(ri, ds);
     _pass = 0;
 
-    const unsigned MAX_NUM_TILES=128u; // TODO!
-    geom->allocateGLObjects(ri, MAX_NUM_TILES);
+    geom->allocateGLObjects(ri, tiles->size());
 
     geom->preCull(ri);
     tiles->drawTiles(ri);
     geom->postCull(ri);
 
-    state->popStateSet();
     state->apply();
-    //static_cast<StateEx*>(state)->uniformsGOGO();
 
     // Then render the tiles using the default shader:
-    applyState(ri, ds);
+    applyLocalState(ri, ds);
     _pass = 1;
     tiles->drawTiles(ri);
 
@@ -984,7 +973,7 @@ GroundCoverLayer::Renderer::draw(osg::RenderInfo& ri, const PatchLayer::TileBatc
 }
 
 void
-GroundCoverLayer::Renderer::applyState(osg::RenderInfo& ri, DrawState& ds)
+GroundCoverLayer::Renderer::applyLocalState(osg::RenderInfo& ri, DrawState& ds)
 {
     const osg::Program::PerContextProgram* pcp = ri.getState()->getLastAppliedProgramObject();
     if (!pcp)
@@ -1028,8 +1017,6 @@ GroundCoverLayer::Renderer::applyState(osg::RenderInfo& ri, DrawState& ds)
         {
             u._numInstances1D = 128;
         }
-
-        //u._numInstances1D = 16;
 
         if (geom->getGeometry() == NULL)
         {
@@ -1160,6 +1147,8 @@ GroundCoverLayer::Renderer::releaseGLObjects(osg::State* state) const
                 //j->second->releaseGLObjects(state);
             }
         }
+
+        
     }
 }
 

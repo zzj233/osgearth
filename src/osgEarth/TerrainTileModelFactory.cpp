@@ -312,7 +312,6 @@ TerrainTileModelFactory::addColorLayers(
     bool standalone)
 {
     OE_PROFILING_ZONE;
-    OE_START_TIMER(fetch_image_layers);
 
     int order = 0;
 
@@ -352,9 +351,6 @@ TerrainTileModelFactory::addColorLayers(
             model->colorLayers().push_back(colorModel);
         }
     }
-
-    if (progress)
-        progress->stats()["fetch_imagery_time"] += OE_STOP_TIMER(fetch_image_layers);
 }
 
 
@@ -367,8 +363,6 @@ TerrainTileModelFactory::addPatchLayers(
     ProgressCallback* progress,
     bool fallback)
 {
-    OE_START_TIMER(fetch_patch_layers);
-
     PatchLayerVector patchLayers;
     map->getLayers(patchLayers);
 
@@ -396,9 +390,6 @@ TerrainTileModelFactory::addPatchLayers(
             }
         }
     }
-
-    if (progress)
-        progress->stats()["fetch_patches_time"] += OE_STOP_TIMER(fetch_patch_layers);
 }
 
 
@@ -411,9 +402,6 @@ TerrainTileModelFactory::addElevation(
     unsigned                     border,
     ProgressCallback*            progress)
 {
-    // make an elevation layer.
-    OE_START_TIMER(fetch_elevation);
-
     bool needElevation = manifest.includesElevation();
     ElevationLayerVector layers;
     map->getLayers(layers);
@@ -501,9 +489,6 @@ TerrainTileModelFactory::addElevation(
             model->normalModel() = layerModel;
         }
     }
-
-    if (progress)
-        progress->stats()["fetch_elevation_time"] += OE_STOP_TIMER(fetch_elevation);
 }
 
 bool

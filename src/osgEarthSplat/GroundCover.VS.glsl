@@ -169,9 +169,8 @@ void oe_GroundCover_VS(inout vec4 vertex_view)
     int biomeIndex = oe_GroundCover_getBiomeIndex(oe_layer_tilec);
     if ( biomeIndex < 0 )
     {
-        biomeIndex = 0;
         // No biome defined; bail out without emitting any geometry.
-        //return;
+        return;
     }
 
     // If we're using a mask texture, sample it now:
@@ -243,7 +242,7 @@ void oe_GroundCover_VS(inout vec4 vertex_view)
 #ifdef OE_IS_SHADOW_CAMERA
 
     // For a shadow camera, draw the tree as a cross hatch model instead of a billboard.
-    vp_Color = vec4(1,1,1,falloff);
+    vp_Color = vec4(1.0);
     vec3 heightVector = oe_UpVectorView*height;
     vec3 tangentVector;
 

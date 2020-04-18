@@ -108,14 +108,14 @@ DrawTileCommand::draw(osg::RenderInfo& ri, DrawState& dsMaster, osg::Referenced*
             const Sampler& sampler = (*_sharedSamplers)[s];
             SamplerState& samplerState = ds._samplerState._samplers[s];
 
-            if (sampler._texture.valid()) // && !samplerState._texture.isSetTo(sampler._texture.get()))
+            if (sampler._texture.valid() && !samplerState._texture.isSetTo(sampler._texture.get()))
             {
                 state.setActiveTextureUnit((*dsMaster._bindings)[s].unit());
                 sampler._texture->apply(state);
                 samplerState._texture = sampler._texture.get();
             }
 
-            if (samplerState._matrixUL >= 0) // && !samplerState._matrix.isSetTo(sampler._matrix))
+            if (samplerState._matrixUL >= 0 && !samplerState._matrix.isSetTo(sampler._matrix))
             {
                 ext->glUniformMatrix4fv(samplerState._matrixUL, 1, GL_FALSE, sampler._matrix.ptr());
                 samplerState._matrix = sampler._matrix;

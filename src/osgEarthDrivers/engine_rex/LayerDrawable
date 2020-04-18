@@ -87,6 +87,7 @@ namespace osgEarth { namespace REX
     public: // TileBatch
 
         void drawTiles(osg::RenderInfo& ri) const;
+        std::size_t size() const { return _tiles.size(); }
 
     protected:
         // overriden to prevent OSG from releasing GL objects on an attached stateset.
