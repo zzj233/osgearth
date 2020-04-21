@@ -186,8 +186,8 @@ namespace osgEarth { namespace Splat
             struct DrawState
             {
                 // Geometry differs by zone/groundcover settings
-                typedef UnorderedMap<const void*, osg::ref_ptr<InstanceCloud> > GeomPerGroundCover;
-                GeomPerGroundCover _geom;
+                typedef UnorderedMap<const void*, osg::ref_ptr<InstanceCloud> > InstancerPerGroundCover;
+                InstancerPerGroundCover _instancers;
 
                 Renderer* _renderer;
 
@@ -220,6 +220,10 @@ namespace osgEarth { namespace Splat
             osg::ref_ptr<osg::StateAttribute> _a2cBlending;
 
             unsigned _pass;
+
+            osg::ref_ptr<osg::StateSet> _computeStateSet;
+            osg::Program* _computeProgram;
+            int _counter;
         };
 
         osg::ref_ptr<Renderer> _renderer;

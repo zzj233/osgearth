@@ -24,6 +24,7 @@
 #if OSG_VERSION_GREATER_OR_EQUAL(3,6,0)
 
 #include <osgEarth/VirtualProgram>
+#include <osgEarth/ShaderLoader>
 #include <osg/Program>
 #include <osg/GLExtensions>
 
@@ -44,47 +45,6 @@ using namespace osgEarth;
 
 namespace
 {
-    //const char* cull_CS =
-    //    "#version 430\n"
-
-    //    "layout(local_size_x=1, local_size_y=1, local_size_z=1) in; \n"
-
-    //    "struct DrawElementsIndirectCommand { \n"
-    //    "    uint count; \n"
-    //    "    uint instanceCount; \n"
-    //    "    uint firstIndex; \n"
-    //    "    uint baseVertex; \n"
-    //    "    uint baseInstance; \n"
-    //    "}; \n"
-
-    //    "layout(std430, binding=0) buffer DrawCommandsBuffer { \n"
-    //    "    DrawElementsIndirectCommand cmd[]; \n"
-    //    "}; \n"
-
-    //    "layout(std430, binding=2) buffer PointsBuffer { \n"
-    //    "    vec4 points[]; \n"
-    //    "}; \n"
-
-    //    "layout(std430, binding=1) buffer RenderBuffer { \n"
-    //    "    vec4 render[]; \n"
-    //    "}; \n"
-
-    //    "bool visible(in vec4 model) \n"
-    //    "{ \n"
-    //    "    vec4 clip = gl_ModelViewProjectionMatrix * model; \n"
-    //    "    clip.xyz = abs(clip.xyz/clip.w); \n"
-    //    "    const float f = 1.0; \n"
-    //    "    return clip.x <= f && clip.y <= f; \n"
-    //    "} \n"
-
-    //    "void main() { \n"
-    //    "    const uint i = gl_GlobalInvocationID.x; \n"
-    //    "    if (visible(points[i])) // frustum cull \n"
-    //    "    { \n"
-    //    "        uint slot = atomicAdd(cmd[0].instanceCount, 1); \n"
-    //    "        render[slot] = points[i]; \n"
-    //    "    } \n"
-    //    "} \n";
 
     const char* cull_CS =
         "#version 430\n"
@@ -249,6 +209,7 @@ InstanceCloud::InstancingData::~InstancingData()
 void
 InstanceCloud::InstancingData::allocateGLObjects(osg::State* state, unsigned numTiles)
 {
+
     if (numTilesAllocated < numTiles)
     {
         OE_DEBUG << LC << "Reallocate: " << numTiles << " tiles" << std::endl;
@@ -274,8 +235,9 @@ InstanceCloud::InstancingData::allocateGLObjects(osg::State* state, unsigned num
             commands[i].baseInstance = 0;
         }
 
+        GLuint baseSize = 0; 
         GLuint numInstances = numX * numY;
-        GLuint instanceSize = sizeof(GLfloat)*8; // vec4 vertex; vec2 tilec; vec2 _padding;
+        GLuint instanceSize = 48; // see RenderData in shader (must be a multiple of 16)
 
         ext->glGenBuffers(1, &commandBuffer);
         ext->glBindBuffer(GL_SHADER_STORAGE_BUFFER, commandBuffer);
@@ -286,7 +248,7 @@ InstanceCloud::InstancingData::allocateGLObjects(osg::State* state, unsigned num
             GL_DYNAMIC_STORAGE_BIT); // so we can reset each frame
 
         // buffer for the output data (culled points, written by compute shader)
-        renderBufferTileSize = numInstances*instanceSize;
+        renderBufferTileSize = baseSize + numInstances*instanceSize;
 
         ext->glGenBuffers(1, &renderBuffer);
         ext->glBindBuffer(GL_SHADER_STORAGE_BUFFER, renderBuffer);
@@ -300,12 +262,12 @@ InstanceCloud::InstancingData::allocateGLObjects(osg::State* state, unsigned num
 
 InstanceCloud::InstanceCloud()
 {
-    // install our compute shader in a stateset
-    _computeStateSet = new osg::StateSet();
-    osg::Shader* s = new osg::Shader(osg::Shader::COMPUTE, cull_CS);
-    osg::Program* p = new osg::Program();
-    p->addShader(s);
-    _computeStateSet->setAttribute(p, osg::StateAttribute::ON);
+    //// install our compute shader in a stateset
+    //_computeStateSet = new osg::StateSet();
+    //osg::Shader* s = new osg::Shader(osg::Shader::COMPUTE, cull_CS);
+    //osg::Program* p = new osg::Program();
+    //p->addShader(s);
+    //_computeStateSet->setAttribute(p, osg::StateAttribute::ON);
 }
 
 void
@@ -471,77 +433,5 @@ InstanceCloud::Installer::apply(osg::Drawable& drawable)
         _data->numIndices = geom->getPrimitiveSet(0)->getNumIndices();
     }
 }
-
-#if 0
-
-//...................................................................
-
-InstanceCloudDrawable::InstanceCloudDrawable()
-{
-    setCullingActive(false);
-    _cloud = new InstanceCloud();
-
-    VirtualProgram* vp = VirtualProgram::getOrCreate(getOrCreateStateSet());
-    //vp->setFunction("oe_IC_renderVS", oe_IC_renderVS, ShaderComp::LOCATION_VERTEX_MODEL, -FLT_MAX);
-}
-
-osg::BoundingBox
-InstanceCloudDrawable::computeBoundingBox() const
-{
-    return _cloud->computeBoundingBox();
-}
-
-void 
-InstanceCloudDrawable::drawImplementation(osg::RenderInfo& ri) const
-{
-    _cloud->cull(ri);
-    _cloud->drawTile(ri, 0u);
-}
-
-
-#include <osgViewer/Viewer>
-#include <osgEarth/ExampleResources>
-#include <osgEarth/AnnotationUtils>
-#include <osgEarth/InstanceCloud>
-#include <osgEarth/NodeUtils>
-
-#define DIM 100
-#define SPACING 3
-
-osg::Geometry* makeInstance()
-{
-    return osgEarth::findTopMostNodeOfType<osg::Geometry>(
-        AnnotationUtils::createSphere(-0.5, osg::Vec4(1, .5, 0, 1), 15.0));
-}
-
-int main(int argc, char** argv)
-{
-    osg::ArgumentParser arguments(&argc, argv);
-    osgViewer::Viewer viewer(arguments);
-    osg::Group* group = new osg::Group();
-
-    osg::Vec4Array* points = new osg::Vec4Array();
-    for (int i = 0; i < DIM; ++i)
-        for (int j = 0; j < DIM; ++j)
-            points->push_back(osg::Vec4(SPACING * (double)i, SPACING * (double)j, 0, 1));
-
-    osg::Geometry* geom = makeInstance();
-
-    InstanceCloudDrawable* drawable = new InstanceCloudDrawable();
-    drawable->cloud()->setGeometry(geom);
-    drawable->cloud()->setPositions(points);
-    group->addChild(drawable);
-
-    MapNodeHelper().parse(NULL, arguments, &viewer, group, (Controls::Container*)NULL);
-    MapNodeHelper().configureView(&viewer);
-
-    viewer.getCamera()->setComputeNearFarMode(osg::CullSettings::DO_NOT_COMPUTE_NEAR_FAR);
-    viewer.getCamera()->setProjectionMatrixAsPerspective(30.0, 1.0, 1.0, 1e6);
-
-    viewer.setSceneData(group);
-    return viewer.run();
-}
-
-#endif
 
 #endif // OSG 3.6.0+

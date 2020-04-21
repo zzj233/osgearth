@@ -105,24 +105,6 @@ namespace osgEarth
             osg::ref_ptr<Renderer> _callback;
         };
     };
-
-#if 0
-    class OSGEARTH_EXPORT InstanceCloudDrawable : public osg::Drawable
-    {
-    public:
-        InstanceCloudDrawable();
-
-        void drawImplementation(osg::RenderInfo& ri) const;
-
-        osg::BoundingBox computeBoundingBox() const;
-
-        InstanceCloud* cloud() { return _cloud.get(); }
-
-    private:
-        osg::ref_ptr<InstanceCloud> _cloud;
-    };
-#endif
-
 }
 
 #endif // OSG 3.6+
