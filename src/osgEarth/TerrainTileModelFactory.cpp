@@ -512,22 +512,12 @@ TerrainTileModelFactory::getOrCreateHeightField(
     cachekey._revision     = revision;
     cachekey._samplePolicy = samplePolicy;
 
-    if (progress)
-        progress->stats()["hfcache_try_count"] += 1;
-
     bool hit = false;
     HFCache::Record rec;
     if ( _heightFieldCacheEnabled && _heightFieldCache.get(cachekey, rec) )
     {
         out_hf = rec.value()._hf.get();
         out_normalMap = rec.value()._normalMap.get();
-
-        if (progress)
-        {
-            progress->stats()["hfcache_hit_count"] += 1;
-            progress->stats()["hfcache_hit_rate"] = progress->stats()["hfcache_hit_count"]/progress->stats()["hfcache_try_count"];
-        }
-
         return true;
     }
 
