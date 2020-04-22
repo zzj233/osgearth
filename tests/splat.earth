@@ -32,12 +32,12 @@
     <GroundCover name="Trees">
         <xi:include href="../data/splat/trees/groundcover.xml"/>
         <color_layer>World Imagery</color_layer>
-        <color_min_saturation>0.40</color_min_saturation>
+        <color_min_saturation>0.1</color_min_saturation>
         <cast_shadows>true</cast_shadows>
     </GroundCover>
 
     <!-- Procedural grass -->
-    <Grass name="Grass" max_range="200">
+    <Grass name="Grass" max_range="150">
         <xi:include href="../data/splat/grass/groundcover.xml"/>
     </Grass>
 

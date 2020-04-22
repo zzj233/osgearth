@@ -60,6 +60,9 @@ GrassLayer::init()
 
     // no shadow casting
     options().castShadows().setDefault(false);
+
+    // smooth picking for grouped instances of grass (3=clumpy)
+    getOrCreateStateSet()->setDefine("OE_GROUNDCOVER_PICK_NOISE_TYPE", "3");
 }
 
 void

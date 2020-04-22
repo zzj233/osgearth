@@ -65,6 +65,7 @@ namespace osgEarth
         public:
             virtual void drawTiles(osg::RenderInfo& ri) const = 0;
             virtual std::size_t size() const = 0;
+            virtual std::size_t getBatchID() const = 0;
         };
 
         //! Internal

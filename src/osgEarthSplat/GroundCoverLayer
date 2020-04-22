@@ -193,6 +193,9 @@ namespace osgEarth { namespace Splat
 
                 typedef UnorderedMap<const void*, UniformState> UniformsPerPCP;
                 UniformsPerPCP _uniforms;
+
+                osg::Matrixd _mvp;
+                std::size_t _lastTileBatchID;
             };
 
             // one per graphics context

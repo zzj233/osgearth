@@ -46,7 +46,7 @@ layout(binding=0, std430) buffer DrawCommandsBuffer
 
 struct RenderData
 {
-    vec4 vertex_view; // 16
+    vec4 vertex;      // 16
     vec2 tilec;       // 8
     uint sideIndex;   // 4
     uint topIndex;    // 4
@@ -100,6 +100,13 @@ uniform mat4 OE_GROUNDCOVER_MASK_MATRIX;
 #ifdef OE_GROUNDCOVER_COLOR_SAMPLER
   uniform sampler2D OE_GROUNDCOVER_COLOR_SAMPLER ;
   uniform mat4 OE_GROUNDCOVER_COLOR_MATRIX ;
+#endif
+
+#pragma import_defines(OE_GROUNDCOVER_PICK_NOISE_TYPE)
+#ifdef OE_GROUNDCOVER_PICK_NOISE_TYPE
+  int pickNoiseType = OE_GROUNDCOVER_PICK_NOISE_TYPE ;
+#else
+  int pickNoiseType = NOISE_RANDOM;
 #endif
 
 #ifdef OE_GROUNDCOVER_COLOR_SAMPLER
@@ -180,20 +187,24 @@ void main()
     // scale the noise value back up to [0..1]
     if (noise[NOISE_SMOOTH] > biome.fill)
         return;
-    else
-        noise[NOISE_SMOOTH] /= biome.fill;
+
+    noise[NOISE_SMOOTH] /= biome.fill;
 
     vec4 vertex_model = vec4(
         mix(oe_GroundCover_LL.xy, oe_GroundCover_UR.xy, tilec),
         getElevation(tilec), 1);
+
+#if 0 // Cannot view-cull when we're only computing on demand!
 
     vec4 vertex_view = gl_ModelViewMatrix * vertex_model;
 
     if (!inRange(vertex_view))
         return;
 
+    // Cannot frustum cull when we're only computing on demand!
     if (!inFrustum(vertex_view))
         return;
+#endif
 
     // It's a keeper. Populate the render buffer.
     uint start = oe_GroundCover_tileNum * gl_NumWorkGroups.y * gl_NumWorkGroups.x;
@@ -204,11 +215,11 @@ void main()
     if (noise[NOISE_SMOOTH] > xx)
         render[slot].fillEdge = 1.0-((noise[NOISE_SMOOTH]-xx)/(1.0-xx));
 
-    render[slot].vertex_view = vertex_view;
+    render[slot].vertex = vertex_model;
     render[slot].tilec = tilec;
 
     // select a billboard at random
-    float pickNoise = 1.0-noise[NOISE_SMOOTH];
+    float pickNoise = 1.0-noise[pickNoiseType];
     int objectIndex = biome.firstObjectIndex + int(floor(pickNoise * float(biome.numObjects)));
     objectIndex = min(objectIndex, biome.firstObjectIndex + biome.numObjects - 1);
 

@@ -5,13 +5,9 @@ $GLSL_DEFAULT_PRECISION_FLOAT
 #pragma vp_entryPoint oe_Grass_VS
 #pragma vp_location   vertex_view
 
-#pragma import_defines(OE_GROUNDCOVER_USE_INSTANCING)
-
 // Instance data from compute shader
-
-struct RenderData
-{
-    vec4 vertex_view; // 16
+struct RenderData {   // vec4 aligned, please
+    vec4 vertex;      // 16
     vec2 tilec;       // 8
     uint sideIndex;   // 4
     uint topIndex;    // 4
@@ -20,8 +16,7 @@ struct RenderData
     float fillEdge;   // 4
     float _padding;   // 4
 };
-layout(binding=1, std430) buffer RenderBuffer
-{
+layout(binding=1, std430) readonly buffer RenderBuffer {
     RenderData render[];
 };
 
@@ -70,7 +65,7 @@ void oe_Grass_VS(inout vec4 vertex)
     // intialize with a "no draw" value:
     oe_GroundCover_atlasIndex = -1.0;
 
-    vertex = render[gl_InstanceID].vertex_view;
+    vertex = gl_ModelViewMatrix * render[gl_InstanceID].vertex;
     oe_layer_tilec = vec4(render[gl_InstanceID].tilec, 0, 1);
 
     // Sample our noise texture
@@ -80,6 +75,10 @@ void oe_Grass_VS(inout vec4 vertex)
     float maxRange = oe_GroundCover_maxDistance / oe_Camera.z;
     float zv = vertex.z;
     float nRange = clamp(-zv/maxRange, 0.0, 1.0);
+
+    // cull verts that are out of range. Sadly we can't do this in COMPUTE.
+    if (nRange >= 0.99)
+        return;
 
     oe_GroundCover_atlasIndex = float(render[gl_InstanceID].sideIndex);
 

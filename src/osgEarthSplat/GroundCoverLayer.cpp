@@ -755,18 +755,12 @@ GroundCoverLayer::Renderer::UniformState::UniformState()
 {
     // initialize all the uniform locations - we will fetch these at draw time
     // when the program is active
-    //_pcp = NULL;
-    _numInstancesUL = -1;
     _LLUL = -1;
     _URUL = -1;
-    _LLNormalUL = -1;
-    _URNormalUL = -1;
     _A2CUL = -1;
     _tileNumUL = -1;
-    _instancedModelUL = -1;
     _tileCounter = 0;
     _numInstances1D = 0;
-    _instancedModelValue = -1;
 }
 
 GroundCoverLayer::Renderer::Renderer(GroundCoverLayer* layer)
@@ -774,12 +768,10 @@ GroundCoverLayer::Renderer::Renderer(GroundCoverLayer* layer)
     _layer = layer;
 
     // create uniform IDs for each of our uniforms
-    _numInstancesUName = osg::Uniform::getNameID("oe_GroundCover_numInstances");
     _LLUName = osg::Uniform::getNameID("oe_GroundCover_LL");
     _URUName = osg::Uniform::getNameID("oe_GroundCover_UR");
     _A2CName = osg::Uniform::getNameID("oe_GroundCover_A2C");
     _tileNumUName = osg::Uniform::getNameID("oe_GroundCover_tileNum");
-    _instancedModelUName = osg::Uniform::getNameID("oe_GroundCover_instancedModel");
 
     _drawStateBuffer.resize(256u);
 
@@ -824,16 +816,28 @@ GroundCoverLayer::Renderer::draw(osg::RenderInfo& ri, const PatchLayer::TileBatc
     // I am missing something. -gw 4/20/20
     state->pushStateSet(_layer->getStateSet());
 
-    // First pass: render with compute shader
-    state->apply(_computeStateSet.get());
+    // Only run the compute shader when the tile batch has changed:
+    bool needsCompute = false;
+    if (ds._lastTileBatchID != tiles->getBatchID())
+    {
+        ds._lastTileBatchID = tiles->getBatchID();
+        needsCompute = true;
+    }
 
-    applyLocalState(ri, ds);
+    if (needsCompute)
+    {
+        // First pass: render with compute shader
+        state->apply(_computeStateSet.get());
+        applyLocalState(ri, ds);
 
-    instancer->allocateGLObjects(ri, tiles->size());
-    instancer->preCull(ri);
-    _pass = 0;
-    tiles->drawTiles(ri);
-    instancer->postCull(ri);
+        instancer->allocateGLObjects(ri, tiles->size());
+        instancer->preCull(ri);
+        _pass = 0;
+        tiles->drawTiles(ri);
+        instancer->postCull(ri);
+
+        //OE_WARN << "compute frame " << state->getFrameStamp()->getFrameNumber() << std::endl;
+    }
 
     // Second pass: render the tiles using the default shader:
     state->apply();
@@ -864,14 +868,12 @@ GroundCoverLayer::Renderer::applyLocalState(osg::RenderInfo& ri, DrawState& ds)
 
     UniformState& u = ds._uniforms[pcp];
 
-    if (u._numInstancesUL < 0)
+    if (u._LLUL < 0)
     {
-        u._numInstancesUL = pcp->getUniformLocation(_numInstancesUName);
         u._LLUL = pcp->getUniformLocation(_LLUName);
         u._URUL = pcp->getUniformLocation(_URUName);
         u._A2CUL = pcp->getUniformLocation(_A2CName);
         u._tileNumUL = pcp->getUniformLocation(_tileNumUName);
-        u._instancedModelUL = pcp->getUniformLocation(_instancedModelUName);
     }
 
     u._tileCounter = 0;
@@ -906,16 +908,6 @@ GroundCoverLayer::Renderer::applyLocalState(osg::RenderInfo& ri, DrawState& ds)
         }
     }
 
-#if 0
-    // on the first draw call this frame, initialize the uniform that tells the
-    // shader the total number of instances:
-    if (u._numInstancesUL >= 0)
-    {
-        osg::Vec2f numInstances(u._numInstances1D, u._numInstances1D);
-        ext->glUniform2fv(u._numInstancesUL, 1, numInstances.ptr());
-    }
-#endif
-
     GLint multiSamplesOn = ri.getState()->getLastAppliedMode(GL_MULTISAMPLE) ? 1 : 0;
     ri.getState()->applyMode(GL_SAMPLE_ALPHA_TO_COVERAGE_ARB, multiSamplesOn == 1);
     ri.getState()->applyAttribute(_a2cBlending.get());
@@ -923,16 +915,6 @@ GroundCoverLayer::Renderer::applyLocalState(osg::RenderInfo& ri, DrawState& ds)
     if (u._A2CUL >= 0)
     {
         ext->glUniform1i(u._A2CUL, multiSamplesOn);
-    }
-
-#ifdef TEST_MODEL_INSTANCING
-    const int useInstancedModel = 1;
-#else
-    const int useInstancedModel = 0;
-#endif
-    if (u._instancedModelUL >= 0)
-    {
-        ext->glUniform1i(u._instancedModelUL, useInstancedModel);
     }
 }
 
@@ -948,9 +930,8 @@ GroundCoverLayer::Renderer::drawTile(osg::RenderInfo& ri, const PatchLayer::Draw
 
     UniformState& u = ds._uniforms[pcp];
 
-    if (_pass == 0)
+    if (_pass == 0) // COMPUTE shader
     {
-
         osg::GLExtensions* ext = osg::GLExtensions::Get(ri.getContextID(), true);
 
         // uniform sets the offset into the SSBO holding all the render data
@@ -972,32 +953,23 @@ GroundCoverLayer::Renderer::drawTile(osg::RenderInfo& ri, const PatchLayer::Draw
             //if (LL != u._LLAppliedValue)
             {
                 ext->glUniform3fv(u._LLUL, 1, LL.ptr());
-                u._LLAppliedValue = LL;
+                //u._LLAppliedValue = LL;
             }
 
             //if (UR != u._URAppliedValue)
             {
                 ext->glUniform3fv(u._URUL, 1, UR.ptr());
-                u._URAppliedValue = UR;
+                //u._URAppliedValue = UR;
             }
         }
 
         instancer->cullTile(ri, u._tileCounter);
     }
 
-    else
+    else // DRAW shader
     {
         instancer->drawTile(ri, u._tileCounter);
     }
-
-    //if (_pass == 0)
-    //{
-    //    instancer->cullTile(ri, u._tileCounter);
-    //}
-    //else
-    //{
-    //    instancer->drawTile(ri, u._tileCounter);
-    //}
 
     ++u._tileCounter;
 }

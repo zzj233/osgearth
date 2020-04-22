@@ -19,6 +19,7 @@
 #include "LayerDrawable"
 #include "TerrainRenderData"
 #include <osgEarth/Metrics>
+#include <sstream>
 
 using namespace osgEarth::REX;
 
@@ -48,6 +49,36 @@ LayerDrawable::~LayerDrawable()
     // we don't want that because our Layer stateset is shared and re-usable.
     // So detach it before OSG has a chance to do so.
     setStateSet(0L);
+}
+
+void
+LayerDrawable::finalize()
+{
+    // if this is a patch layer with a draw callback, we need to
+    // generate a batch ID.
+    //if (_drawCallback.valid())
+    //{
+    if (_patchLayer)
+    {
+        std::stringstream buf;
+        for(DrawTileCommands::const_iterator i = _tiles.begin();
+            i != _tiles.end();
+            ++i)
+        {
+            buf << i->_key->str() << "/" << i->_tileRevision << "/";
+        }
+        _tileBatchId = osgEarth::hashString(buf.str());
+    }
+
+    //    // build the tilekey hashes. Not exactly pristine. TODO
+    //    _tileBatchId = 0;
+    //    for(DrawTileCommands::const_iterator i = _tiles.begin();
+    //        i != _tiles.end();
+    //        ++i)
+    //    {
+    //        _tileBatchId += (i->_key->hash() + i->_tileRevision);
+    //    }
+    //}
 }
 
 namespace
@@ -109,7 +140,7 @@ LayerDrawable::drawImplementation(osg::RenderInfo& ri) const
     //OE_INFO << LC << (_layer ? _layer->getName() : "[empty]") << " tiles=" << _tiles.size() << std::endl;
 
     if (_patchLayer && _patchLayer->getDrawCallback())
-    {
+    {        
         _patchLayer->getDrawCallback()->draw(ri, this);
     }
     else

@@ -5,15 +5,13 @@ $GLSL_DEFAULT_PRECISION_FLOAT
 #pragma vp_entryPoint oe_GroundCover_VS
 #pragma vp_location   vertex_view
 
-#pragma import_defines(OE_GROUNDCOVER_USE_INSTANCING)
 #pragma import_defines(OE_GROUNDCOVER_MASK_SAMPLER)
 #pragma import_defines(OE_GROUNDCOVER_MASK_MATRIX)
 #pragma import_defines(OE_IS_SHADOW_CAMERA)
 
 // Instance data from compute shader
-struct RenderData
-{
-    vec4 vertex_view; // 16
+struct RenderData {
+    vec4 vertex;      // 16
     vec2 tilec;       // 8
     uint sideIndex;   // 4
     uint topIndex;    // 4
@@ -22,11 +20,10 @@ struct RenderData
     float fillEdge;   // 4
     float _padding;   // 4
 };
-layout(binding=1, std430) buffer RenderBuffer {
+
+layout(binding=1, std430) readonly buffer RenderBuffer {
     RenderData render[];
 };
-
-//out vec4 oe_layer_tilec;
 
 // Noise texture:
 uniform sampler2D oe_GroundCover_noiseTex;
@@ -34,9 +31,6 @@ uniform sampler2D oe_GroundCover_noiseTex;
 #define NOISE_RANDOM   1
 #define NOISE_RANDOM_2 2
 #define NOISE_CLUMPY   3
-
-// 0=draw a textured billboard; 1=draw an instanced model
-uniform int oe_GroundCover_instancedModel;
 
 uniform float oe_GroundCover_wind; // wind blowing the foliage
 uniform float oe_GroundCover_maxDistance;     // distance at which flora disappears
@@ -57,7 +51,6 @@ out vec2 oe_GroundCover_texCoord;
 // Output that selects the land cover texture from the texture array (non interpolated)
 flat out float oe_GroundCover_atlasIndex;
 
-out vec2 modelCoords;
 
 // Generate a wind-perturbation value
 float oe_GroundCover_applyWind(float time, float factor, float randOffset)
@@ -95,58 +88,28 @@ void oe_GroundCover_VS(inout vec4 vertex_view)
     // intialize with a "no draw" value (consider using a compute/gs cull instead)
     oe_GroundCover_atlasIndex = -1.0;
 
-    vertex_view = render[gl_InstanceID].vertex_view;
+    vertex_view = gl_ModelViewMatrix * render[gl_InstanceID].vertex;
     oe_layer_tilec = vec4(render[gl_InstanceID].tilec, 0, 1);
 
-    vec4 noise = textureLod(oe_GroundCover_noiseTex, oe_layer_tilec.st, 0);   
+    vec4 noise = textureLod(oe_GroundCover_noiseTex, oe_layer_tilec.st, 0);  
 
-    if (oe_GroundCover_instancedModel == 0)
-    {
-        vp_Normal = vec3(0, 0, 1);
-        vp_Color = vec4(1, 1, 1, 0);
-    }
-
-#if 0 // figure this out ...
-
-    // discard instances based on noise value threshold (coverage). If it passes,
-    // scale the noise value back up to [0..1]
-    if (noise[NOISE_SMOOTH] > biome.fill)
-        return;
-    else
-        noise[NOISE_SMOOTH] /= biome.fill;
-#endif
+    vp_Color = vec4(1);
+    vp_Normal = vec3(0,0,1);
 
     // Calculate the normalized camera range (oe_Camera.z = LOD Scale)
     float maxRange = oe_GroundCover_maxDistance / oe_Camera.z;
     float nRange = clamp(-vertex_view.z/maxRange, 0.0, 1.0);
 
-    // Distance culling:
-    if ( nRange == 1.0 )
+    // cull verts that are out of range. Sadly we can't do this in COMPUTE.
+    if (nRange >= 0.99)
         return;
-
-    // Instancing? We are finished
-    if (oe_GroundCover_instancedModel == 1)
-    {
-        oe_GroundCover_atlasIndex = 1.0;
-        return;
-    }
 
     oe_GroundCover_atlasIndex = float(render[gl_InstanceID].sideIndex);
 
     // push the falloff closer to the max distance.
     float falloff = 1.0-(nRange*nRange*nRange);
-
-#if 0
-    // a pseudo-random scale factor to the width and height of a billboard
-    float sizeScale = billboard.sizeVariation * (noise[NOISE_RANDOM_2]*2.0-1.0);
-
-    float width = (billboard.width + billboard.width*sizeScale) * falloff;
-
-    float height = (billboard.height + billboard.height*sizeScale) * falloff;
-#else
     float width = render[gl_InstanceID].width * falloff;
     float height = render[gl_InstanceID].width * falloff;
-#endif
 
     int which = gl_VertexID & 7; // mod8 - there are 8 verts per instance
 
