@@ -354,7 +354,10 @@ InstanceCloud::cullTile(osg::RenderInfo& ri, unsigned tileNum)
 void
 InstanceCloud::postCull(osg::RenderInfo& ri)
 {
-    //nop
+    osg::State* state = ri.getState();
+    osg::GLExtensions* ext = state->get<osg::GLExtensions>();
+
+    ext->glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT | GL_COMMAND_BARRIER_BIT);
 }
 
 void
@@ -396,8 +399,6 @@ InstanceCloud::Renderer::drawImplementation(osg::RenderInfo& ri, const osg::Draw
             _data->commandBuffer);
 
         ext->glBindBuffer(GL_DRAW_INDIRECT_BUFFER, _data->commandBuffer);
-
-        ext->glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT | GL_COMMAND_BARRIER_BIT);
     }
 
     // activate the "nth" tile in the render buffer:

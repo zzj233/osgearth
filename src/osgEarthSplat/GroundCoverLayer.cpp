@@ -811,11 +811,6 @@ GroundCoverLayer::Renderer::draw(osg::RenderInfo& ri, const PatchLayer::TileBatc
         instancer = new InstanceCloud();
     }
 
-    // I'm not sure why we have to push the layer's stateset here.
-    // It should have bee applied already in the render bin.
-    // I am missing something. -gw 4/20/20
-    state->pushStateSet(_layer->getStateSet());
-
     // Only run the compute shader when the tile batch has changed:
     bool needsCompute = false;
     if (ds._lastTileBatchID != tiles->getBatchID())
@@ -826,6 +821,12 @@ GroundCoverLayer::Renderer::draw(osg::RenderInfo& ri, const PatchLayer::TileBatc
 
     if (needsCompute)
     {
+        // I'm not sure why we have to push the layer's stateset here.
+        // It should have bee applied already in the render bin.
+        // I am missing something. -gw 4/20/20
+        
+        state->pushStateSet(_layer->getStateSet());
+
         // First pass: render with compute shader
         state->apply(_computeStateSet.get());
         applyLocalState(ri, ds);
@@ -836,16 +837,23 @@ GroundCoverLayer::Renderer::draw(osg::RenderInfo& ri, const PatchLayer::TileBatc
         tiles->drawTiles(ri);
         instancer->postCull(ri);
 
-        //OE_WARN << "compute frame " << state->getFrameStamp()->getFrameNumber() << std::endl;
+        // restore previous program
+        state->apply();
+
+        // rendering pass:
+        applyLocalState(ri, ds);
+        _pass = 1;
+        tiles->drawTiles(ri);
+
+        state->popStateSet();
     }
 
-    // Second pass: render the tiles using the default shader:
-    state->apply();
-    applyLocalState(ri, ds);
-    _pass = 1;
-    tiles->drawTiles(ri);
-
-    state->popStateSet();
+    else
+    {
+        applyLocalState(ri, ds);
+        _pass = 1;
+        tiles->drawTiles(ri);
+    }
 
     // Clean up and finish
 #if OSG_VERSION_GREATER_OR_EQUAL(3,5,6)

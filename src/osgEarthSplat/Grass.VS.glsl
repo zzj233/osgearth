@@ -6,11 +6,12 @@ $GLSL_DEFAULT_PRECISION_FLOAT
 #pragma vp_location   vertex_view
 
 // Instance data from compute shader
-struct RenderData {   // vec4 aligned, please
+struct RenderData // vec4 aligned please
+{
     vec4 vertex;      // 16
     vec2 tilec;       // 8
-    uint sideIndex;   // 4
-    uint topIndex;    // 4
+    int sideIndex;    // 4
+    int  topIndex;    // 4
     float width;      // 4
     float height;     // 4
     float fillEdge;   // 4
