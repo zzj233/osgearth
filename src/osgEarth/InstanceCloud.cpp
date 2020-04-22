@@ -326,8 +326,9 @@ InstanceCloud::preCull(osg::RenderInfo& ri)
     osg::State* state = ri.getState();
     osg::GLExtensions* ext = state->get<osg::GLExtensions>();
 
-    if (state->getUseModelViewAndProjectionUniforms()) 
-        state->applyModelViewAndProjectionUniformsIfRequired();
+    // not used
+    //if (state->getUseModelViewAndProjectionUniforms()) 
+    //    state->applyModelViewAndProjectionUniformsIfRequired();
 
     // Reset all the instance counts to zero.
     ext->glBindBuffer(GL_SHADER_STORAGE_BUFFER, _data.commandBuffer);

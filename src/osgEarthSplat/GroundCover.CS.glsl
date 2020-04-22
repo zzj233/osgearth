@@ -61,13 +61,6 @@ layout(binding=1, std430) writeonly buffer RenderBuffer
     RenderData render[];
 };
 
-bool inFrustum(in vec4 vertex_view)
-{
-    vec4 clip = gl_ProjectionMatrix * vertex_view;
-    clip.xyz /= clip.w;
-    return abs(clip.x) <= 1.01 && clip.y < 1.0;
-}
-
 uniform sampler2D oe_GroundCover_noiseTex;
 #define NOISE_SMOOTH   0
 #define NOISE_RANDOM   1
@@ -131,11 +124,22 @@ bool isLegalColor(in vec2 tilec)
 
 #endif // OE_GROUNDCOVER_COLOR_SAMPLER
 
+#if 0
 bool inRange(in vec4 vertex_view)
 {
     float maxRange = oe_GroundCover_maxDistance / oe_Camera.z;
     return (-vertex_view.z <= oe_GroundCover_maxDistance);
 }
+#endif
+
+#if 0
+bool inFrustum(in vec4 vertex_view)
+{
+    vec4 clip = gl_ProjectionMatrix * vertex_view;
+    clip.xyz /= clip.w;
+    return abs(clip.x) <= 1.01 && clip.y < 1.0;
+}
+#endif
 
 float getElevation(in vec2 tilec)
 {
