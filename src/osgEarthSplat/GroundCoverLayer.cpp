@@ -629,7 +629,9 @@ GroundCoverLayer::releaseGLObjects(osg::State* state) const
     }
 
     if (_renderer.valid())
+    {
         _renderer->releaseGLObjects(state);
+    }
 
     PatchLayer::releaseGLObjects(state);
 }
@@ -986,20 +988,6 @@ void
 GroundCoverLayer::Renderer::resizeGLObjectBuffers(unsigned maxSize)
 {
     _drawStateBuffer.resize(osg::maximum(maxSize, _drawStateBuffer.size()));
-
-    for (unsigned i = 0; i < _drawStateBuffer.size(); ++i)
-    {
-        const DrawState& ds = _drawStateBuffer[i];
-        for (DrawState::InstancerPerGroundCover::const_iterator j = ds._instancers.begin();
-            j != ds._instancers.end();
-            ++j)
-        {
-            if (j->second.valid())
-            {
-                //j->second->resizeGLObjectBuffers(maxSize);
-            }
-        }
-    }
 }
 
 void
@@ -1014,7 +1002,7 @@ GroundCoverLayer::Renderer::releaseGLObjects(osg::State* state) const
         {
             if (j->second.valid())
             {
-                //j->second->releaseGLObjects(state);
+                j->second->releaseGLObjects(state);
             }
         }
 

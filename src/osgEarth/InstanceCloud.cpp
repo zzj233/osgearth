@@ -213,21 +213,15 @@ InstanceCloud::InstancingData::~InstancingData()
 void
 InstanceCloud::InstancingData::allocateGLObjects(osg::State* state, unsigned numTiles)
 {
-
     if (numTilesAllocated < numTiles)
     {
         OE_DEBUG << LC << "Reallocate: " << numTiles << " tiles" << std::endl;
 
+        releaseGLObjects(state);
+
         osg::GLExtensions* ext = state->get<osg::GLExtensions>();
 
         numTilesAllocated = numTiles;
-
-        if (commands)
-            delete[] commands;
-        if (commandBuffer >= 0)
-            ext->glDeleteBuffers(1, &commandBuffer);
-        if (renderBuffer >= 0)
-            ext->glDeleteBuffers(1, &renderBuffer);
 
         commands = new DrawElementsIndirectCommand[numTilesAllocated];
         for(unsigned i=0; i<numTilesAllocated; ++i)
@@ -264,14 +258,37 @@ InstanceCloud::InstancingData::allocateGLObjects(osg::State* state, unsigned num
     }
 }
 
+void
+InstanceCloud::InstancingData::releaseGLObjects(osg::State* state) const
+{
+    if (state)
+    {
+        osg::GLExtensions* ext = state->get<osg::GLExtensions>();
+
+        if (commands)
+            delete[] commands;
+
+        if (commandBuffer >= 0)
+            ext->glDeleteBuffers(1, &commandBuffer);
+
+        if (renderBuffer >= 0)
+            ext->glDeleteBuffers(1, &renderBuffer);
+    }
+    else
+    {
+        // wut?
+    }
+}
+
 InstanceCloud::InstanceCloud()
 {
-    //// install our compute shader in a stateset
-    //_computeStateSet = new osg::StateSet();
-    //osg::Shader* s = new osg::Shader(osg::Shader::COMPUTE, cull_CS);
-    //osg::Program* p = new osg::Program();
-    //p->addShader(s);
-    //_computeStateSet->setAttribute(p, osg::StateAttribute::ON);
+    //nop
+}
+
+void
+InstanceCloud::releaseGLObjects(osg::State* state) const
+{
+    _data.releaseGLObjects(state);
 }
 
 void
@@ -329,17 +346,17 @@ InstanceCloud::preCull(osg::RenderInfo& ri)
 {
     osg::GLExtensions* ext = ri.getState()->get<osg::GLExtensions>();
 
-    //if (state->getUseModelViewAndProjectionUniforms())
-    //    state->applyModelViewAndProjectionUniformsIfRequired();
-
-    // Reset all the instance counts to zero.
+    // Reset all the instance counts to zero by copying the empty
+    // prototype buffer to the GPU
     ext->glBindBuffer(GL_SHADER_STORAGE_BUFFER, _data.commandBuffer);
+
     ext->glBufferSubData(
         GL_SHADER_STORAGE_BUFFER, 
         0,
         _data.numTilesAllocated * sizeof(DrawElementsIndirectCommand),
         &_data.commands[0]);
 
+    // Bind our SSBOs to their respective layout indices in the shader
     ext->glBindBufferBase(GL_SHADER_STORAGE_BUFFER, BINDING_COMMAND_BUFFER, _data.commandBuffer);
 
     ext->glBindBufferBase(GL_SHADER_STORAGE_BUFFER, BINDING_RENDER_BUFFER, _data.renderBuffer);
@@ -406,8 +423,8 @@ InstanceCloud::Renderer::drawImplementation(osg::RenderInfo& ri, const osg::Draw
         _data->renderBufferTileSize);
 
     _glDrawElementsIndirect(
-        GL_TRIANGLES, 
-        GL_UNSIGNED_SHORT,
+        _data->mode,
+        _data->dataType,
         (const void*)(_data->tileToDraw * sizeof(DrawElementsIndirectCommand)) );
 }
 
@@ -427,6 +444,10 @@ InstanceCloud::Installer::apply(osg::Drawable& drawable)
     {
         geom->setDrawCallback(_callback.get());
         geom->setCullingActive(false);
-        _data->numIndices = geom->getPrimitiveSet(0)->getNumIndices();
+
+        osg::PrimitiveSet* p = geom->getPrimitiveSet(0);
+        _data->numIndices = p->getNumIndices();
+        _data->mode = p->getMode();
+        _data->dataType = p->getDrawElements()->getDataType();
     }
 }

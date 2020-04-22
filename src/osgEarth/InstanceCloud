@@ -29,6 +29,10 @@
 
 namespace osgEarth
 {
+    /**
+     * InstanceCloud is a helper class that facilitates primitive set
+     * instancing across multiple tiles.
+     */
     class OSGEARTH_EXPORT InstanceCloud : public osg::Referenced
     {
     public:
@@ -51,14 +55,16 @@ namespace osgEarth
             GLsizei renderBufferTileSize;
             osg::Vec4Array* points;
             unsigned numX, numY;
-            osg::ref_ptr<osg::Node> node;
             unsigned numTilesAllocated;
-            unsigned numIndices;
             unsigned tileToDraw;
+            GLuint numIndices;
+            GLenum mode;
+            GLenum dataType;
 
             InstancingData();
             ~InstancingData();
             void allocateGLObjects(osg::State* state, unsigned numTiles);
+            void releaseGLObjects(osg::State* state) const;
 
             // pre-OSG 3.6 support
             void (GL_APIENTRY * _glBufferStorage)(GLenum, GLuint, const void*, GLenum);
@@ -73,7 +79,6 @@ namespace osgEarth
         void setNumInstances(unsigned x, unsigned y);
         
         void allocateGLObjects(osg::RenderInfo&, unsigned numTiles);
-
         
         void preCull(osg::RenderInfo&);
         void cullTile(osg::RenderInfo&, unsigned tileNum);
@@ -83,12 +88,11 @@ namespace osgEarth
 
         osg::BoundingBox computeBoundingBox() const;
 
-        osg::StateSet* getCullStateSet() const { return _computeStateSet.get(); }
+        virtual void releaseGLObjects(osg::State* state) const;
 
     public:
 
         InstancingData _data;
-        osg::ref_ptr<osg::StateSet> _computeStateSet;
         osg::ref_ptr<osg::Geometry> _geom;
 
         struct Renderer : public osg::Geometry::DrawCallback
