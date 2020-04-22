@@ -24,8 +24,6 @@
 
 #include <osgEarth/Common>
 
-#if OSG_VERSION_GREATER_OR_EQUAL(3,6,0)
-
 #include <osg/Geometry>
 #include <osg/GL>
 
@@ -61,6 +59,9 @@ namespace osgEarth
             InstancingData();
             ~InstancingData();
             void allocateGLObjects(osg::State* state, unsigned numTiles);
+
+            // pre-OSG 3.6 support
+            void (GL_APIENTRY * _glBufferStorage)(GLenum, GLuint, const void*, GLenum);
         };
 
     public:
@@ -95,6 +96,9 @@ namespace osgEarth
             Renderer(InstancingData* data);
             void drawImplementation(osg::RenderInfo& ri, const osg::Drawable* drawable) const;
             InstancingData* _data;
+
+            // pre-OSG3.6 support
+            void (GL_APIENTRY * _glDrawElementsIndirect)(GLenum, GLenum, const void*);
         };
 
         struct Installer : public osg::NodeVisitor
@@ -106,7 +110,5 @@ namespace osgEarth
         };
     };
 }
-
-#endif // OSG 3.6+
 
 #endif // OSGEARTH_INSTANCE_CLOUD

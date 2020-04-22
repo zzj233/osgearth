@@ -21,8 +21,6 @@
 */
 #include <osgEarth/InstanceCloud>
 
-#if OSG_VERSION_GREATER_OR_EQUAL(3,6,0)
-
 #include <osgEarth/VirtualProgram>
 #include <osgEarth/ShaderLoader>
 #include <osg/Program>
@@ -189,6 +187,11 @@ namespace
 
 //...................................................................
 
+// pre OSG-3.6 support
+#ifndef GL_DRAW_INDIRECT_BUFFER
+#define GL_DRAW_INDIRECT_BUFFER 0x8F3F
+#endif
+
 InstanceCloud::InstancingData::InstancingData() :
     commands(NULL),
     points(NULL),
@@ -197,7 +200,8 @@ InstanceCloud::InstancingData::InstancingData() :
     renderBuffer(-1),
     numTilesAllocated(0u)
 {
-    //nop
+    // polyfill for pre-OSG 3.6 support
+    osg::setGLExtensionFuncPtr(_glBufferStorage, "glBufferStorage", "glBufferStorageARB");
 }
 
 InstanceCloud::InstancingData::~InstancingData()
@@ -241,18 +245,18 @@ InstanceCloud::InstancingData::allocateGLObjects(osg::State* state, unsigned num
 
         ext->glGenBuffers(1, &commandBuffer);
         ext->glBindBuffer(GL_SHADER_STORAGE_BUFFER, commandBuffer);
-        ext->glBufferStorage(
+        _glBufferStorage(
             GL_SHADER_STORAGE_BUFFER,
             numTilesAllocated * sizeof(DrawElementsIndirectCommand),
             NULL,                    // uninitialized memory
             GL_DYNAMIC_STORAGE_BIT); // so we can reset each frame
 
-        // buffer for the output data (culled points, written by compute shader)
+                                     // buffer for the output data (culled points, written by compute shader)
         renderBufferTileSize = baseSize + numInstances*instanceSize;
 
         ext->glGenBuffers(1, &renderBuffer);
         ext->glBindBuffer(GL_SHADER_STORAGE_BUFFER, renderBuffer);
-        ext->glBufferStorage(
+        _glBufferStorage(
             GL_SHADER_STORAGE_BUFFER, 
             numTilesAllocated * renderBufferTileSize,
             NULL,   // uninitialized memory
@@ -323,11 +327,9 @@ InstanceCloud::allocateGLObjects(osg::RenderInfo& ri, unsigned numTiles)
 void
 InstanceCloud::preCull(osg::RenderInfo& ri)
 {
-    osg::State* state = ri.getState();
-    osg::GLExtensions* ext = state->get<osg::GLExtensions>();
+    osg::GLExtensions* ext = ri.getState()->get<osg::GLExtensions>();
 
-    // not used
-    //if (state->getUseModelViewAndProjectionUniforms()) 
+    //if (state->getUseModelViewAndProjectionUniforms())
     //    state->applyModelViewAndProjectionUniformsIfRequired();
 
     // Reset all the instance counts to zero.
@@ -346,8 +348,7 @@ InstanceCloud::preCull(osg::RenderInfo& ri)
 void
 InstanceCloud::cullTile(osg::RenderInfo& ri, unsigned tileNum)
 {
-    osg::State* state = ri.getState();
-    osg::GLExtensions* ext = state->get<osg::GLExtensions>();
+    osg::GLExtensions* ext = ri.getState()->get<osg::GLExtensions>();
 
     ext->glDispatchCompute(_data.numX, _data.numY, 1);
 }
@@ -355,8 +356,7 @@ InstanceCloud::cullTile(osg::RenderInfo& ri, unsigned tileNum)
 void
 InstanceCloud::postCull(osg::RenderInfo& ri)
 {
-    osg::State* state = ri.getState();
-    osg::GLExtensions* ext = state->get<osg::GLExtensions>();
+    osg::GLExtensions* ext = ri.getState()->get<osg::GLExtensions>();
 
     ext->glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT | GL_COMMAND_BARRIER_BIT);
 }
@@ -372,7 +372,8 @@ InstanceCloud::drawTile(osg::RenderInfo& ri, unsigned tileNum)
 InstanceCloud::Renderer::Renderer(InstancingData* data) :
     _data(data)
 {
-    //nop
+    // pre-OSG3.6 support
+    osg::setGLExtensionFuncPtr(_glDrawElementsIndirect, "glDrawElementsIndirect", "glDrawElementsIndirectARB");
 }
 
 void
@@ -384,20 +385,14 @@ InstanceCloud::Renderer::drawImplementation(osg::RenderInfo& ri, const osg::Draw
 
     if (_data->tileToDraw == 0)
     {
-        osg::VertexArrayState* vas = state.getCurrentVertexArrayState();
-        vas->setVertexBufferObjectSupported(true);
-
         const osg::Geometry* geom = drawable->asGeometry();
         geom->drawVertexArraysImplementation(ri);
 
         // TODO: support multiple primtsets....?
         osg::GLBufferObject* ebo = geom->getPrimitiveSet(0)->getOrCreateGLBufferObject(state.getContextID());
-        state.getCurrentVertexArrayState()->bindElementBufferObject(ebo);
+        state.bindElementBufferObject(ebo);
 
-        ext->glBindBufferBase(
-            GL_SHADER_STORAGE_BUFFER, 
-            BINDING_COMMAND_BUFFER, 
-            _data->commandBuffer);
+        ext->glBindBufferBase(GL_SHADER_STORAGE_BUFFER, BINDING_COMMAND_BUFFER, _data->commandBuffer);
 
         ext->glBindBuffer(GL_DRAW_INDIRECT_BUFFER, _data->commandBuffer);
     }
@@ -410,7 +405,7 @@ InstanceCloud::Renderer::drawImplementation(osg::RenderInfo& ri, const osg::Draw
         _data->tileToDraw * _data->renderBufferTileSize,
         _data->renderBufferTileSize);
 
-    ext->glDrawElementsIndirect(
+    _glDrawElementsIndirect(
         GL_TRIANGLES, 
         GL_UNSIGNED_SHORT,
         (const void*)(_data->tileToDraw * sizeof(DrawElementsIndirectCommand)) );
@@ -435,5 +430,3 @@ InstanceCloud::Installer::apply(osg::Drawable& drawable)
         _data->numIndices = geom->getPrimitiveSet(0)->getNumIndices();
     }
 }
-
-#endif // OSG 3.6.0+
