@@ -37,7 +37,7 @@ out vec4 oe_layer_tilec;
 vec3 oe_UpVectorView;
 
 uniform float osg_FrameTime; // OSG frame time (seconds) used for wind animation
-uniform float oe_GroundCover_wind;  // wind strength
+//uniform float oe_GroundCover_wind;  // wind strength
 uniform float oe_GroundCover_maxDistance; // distance at which flora disappears
 
 #pragma import_defines(OE_WIND_TEX, OE_WIND_TEX_MATRIX)
@@ -89,10 +89,10 @@ void oe_Grass_VS(inout vec4 vertex)
     if (nRange >= 0.99)
         return;
 
-    oe_GroundCover_atlasIndex = float(render[gl_InstanceID].sideIndex);
+    // make the grass smoothly disappear in the distance
+    float falloff = clamp(2.0-(nRange + oe_noise[NOISE_SMOOTH]), 0, 1);
 
-    // push the falloff closer to the max distance.
-    float falloff = 1.0-(nRange*nRange*nRange);
+    oe_GroundCover_atlasIndex = float(render[gl_InstanceID].sideIndex);
 
     float width = render[gl_InstanceID].width * clamp(render[gl_InstanceID].fillEdge*2.0, 0, 1);
     float height = render[gl_InstanceID].height * render[gl_InstanceID].fillEdge * falloff;
@@ -162,7 +162,7 @@ void oe_Grass_VS(inout vec4 vertex)
     float windSpeed = clamp(windData.a, 0, 1);
     float windPower = windSpeed * bendPerMetersPerSecond;
 
-    float windEffect = oe_GroundCover_wind * bendPower * falloff;
+    float windEffect = bendPower * falloff; // * oe_GroundCover_wind
     
     // wind turbulence
     vec3 turbDir = vec3(0);
@@ -170,14 +170,18 @@ void oe_Grass_VS(inout vec4 vertex)
     {
         const vec2 turbFreq = vec2(0.1)*windSpeed;
         vec2 turbUV = oe_layer_tilec.xy + turbFreq*osg_FrameTime;
-        turbDir = gl_NormalMatrix * vec3(textureLod(oe_GroundCover_noiseTex, turbUV, 0).xw * 2 - 1, 0);
+        turbDir = gl_NormalMatrix * vec3(textureLod(oe_GroundCover_noiseTex, turbUV, 0).xx * 2 - 1, 0);
     }
 
     bendVec += (windDir+turbDir) * windPower * windEffect;
 #endif
 
-    if (length(bendVec) > vertexHeight)
-        bendVec = normalize(bendVec)*(vertexHeight);
+    // Keep the bending under control
+    float bendLen = length(bendVec);
+    if (bendLen > vertexHeight)
+    {
+        bendVec = (bendVec/bendLen)*vertexHeight;
+    }
 
     vertex.xyz += bendVec;
 }
@@ -200,13 +204,6 @@ uniform sampler2D OE_GROUNDCOVER_COLOR_SAMPLER ;
 uniform mat4 OE_GROUNDCOVER_COLOR_MATRIX ;
 in vec4 oe_layer_tilec;
 #endif
-
-//#pragma import_defines(OE_WIND_TEX, OE_WIND_TEX_MATRIX)
-//#ifdef OE_WIND_TEX
-//uniform sampler2D OE_WIND_TEX ;
-//uniform mat4 OE_WIND_TEX_MATRIX ;
-//in vec4 windPos;
-//#endif
 
 uniform sampler2DArray oe_GroundCover_billboardTex;
 in vec2 oe_GroundCover_texCoord;
