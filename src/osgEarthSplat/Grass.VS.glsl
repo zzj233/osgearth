@@ -40,6 +40,13 @@ uniform float osg_FrameTime; // OSG frame time (seconds) used for wind animation
 uniform float oe_GroundCover_wind;  // wind strength
 uniform float oe_GroundCover_maxDistance; // distance at which flora disappears
 
+#pragma import_defines(OE_WIND_TEX, OE_WIND_TEX_MATRIX)
+#ifdef OE_WIND_TEX
+uniform sampler3D OE_WIND_TEX ;
+uniform mat4 OE_WIND_TEX_MATRIX ;
+#define MAX_WIND_SPEED 50.0
+#endif
+
 #ifdef OE_GROUNDCOVER_USE_ACTOR
 uniform float actorRadius;
 uniform float actorHeight;
@@ -67,6 +74,7 @@ void oe_Grass_VS(inout vec4 vertex)
     oe_GroundCover_atlasIndex = -1.0;
 
     vertex = gl_ModelViewMatrix * render[gl_InstanceID].vertex;
+
     oe_layer_tilec = vec4(render[gl_InstanceID].tilec, 0, 1);
 
     // Sample our noise texture
@@ -130,48 +138,48 @@ void oe_Grass_VS(inout vec4 vertex)
     }
 
     // extrude to height:
-    vertex.xyz += oe_UpVectorView * height * oe_GroundCover_texCoord.t;
+    vec4 vertex_base = vertex;
+
+    float vertexHeight = height * oe_GroundCover_texCoord.t;
+    vertex.xyz += oe_UpVectorView * vertexHeight;
 
     // normal:
     vp_Normal = oe_UpVectorView;
 
     // For bending, exaggerate effect as we climb the stalk
-    vec3 bendVec = vec3(0.0);
     float bendPower = pow(3.0*oe_GroundCover_texCoord.t, 2.0);
 
     // effect of gravity:
     const float gravity = 0.025; // 0=no bend, 1=insane megabend
-    bendVec += faceVec * heightRatio * gravity * bendPower;
+    vec3 bendVec = faceVec * heightRatio * gravity * bendPower;
 
-    // wind:
-    if (oe_GroundCover_wind > 0.0)
+#ifdef OE_WIND_TEX
+    // sample the local wind map.
+    const float bendPerMetersPerSecond = 0.25*vertexHeight;
+    vec4 windData = textureProj(OE_WIND_TEX, (OE_WIND_TEX_MATRIX * vertex_base));
+    vec3 windDir  = normalize(windData.rgb*2 - 1); // view space
+
+    float windSpeed = clamp(windData.a, 0, 1);
+    float windPower = windSpeed * bendPerMetersPerSecond;
+
+    float windEffect = oe_GroundCover_wind * bendPower * falloff;
+    
+    // wind turbulence
+    vec3 turbDir = vec3(0);
+    if (windPower > 0.0)
     {
-        float windEffect = oe_GroundCover_wind * heightRatio * bendPower * 0.2 * falloff;
-
-#ifdef OE_GROUNDCOVER_USE_ACTOR
-        vec3 windPos = (osg_ViewMatrix * vec4(actorPos, 1)).xyz;
-        windPos += oe_UpVectorView * actorHeight;
-
-        // macro:
-        vec3 windvec = vertex.xyz - windPos;
-        float attenuation = clamp(actorRadius/length(windvec), 0, 1);
-        attenuation *= attenuation;
-        bendVec += normalize(windvec) * windEffect * attenuation;
-
-        // micro turbulence
-        vec2 turbUV = oe_layer_tilec.xy + (1.0-oe_GroundCover_wind)*osg_FrameTime;
-        vec2 turb = textureLod(oe_GroundCover_noiseTex, turbUV, 0).xw * 2 - 1;
-        bendVec += gl_NormalMatrix * vec3(turb.xy, 0) * windEffect * attenuation;
-#else
-        const vec2 turbFreq = vec2(0.01);
+        const vec2 turbFreq = vec2(0.1)*windSpeed;
         vec2 turbUV = oe_layer_tilec.xy + turbFreq*osg_FrameTime;
-        vec2 turb = textureLod(oe_GroundCover_noiseTex, turbUV, 0).xw * 2 - 1;
-        bendVec += gl_NormalMatrix * vec3(turb.xy, 0) * windEffect;
-#endif
+        turbDir = gl_NormalMatrix * vec3(textureLod(oe_GroundCover_noiseTex, turbUV, 0).xw * 2 - 1, 0);
     }
 
-    vertex.xyz += bendVec;
+    bendVec += (windDir+turbDir) * windPower * windEffect;
+#endif
 
+    if (length(bendVec) > vertexHeight)
+        bendVec = normalize(bendVec)*(vertexHeight);
+
+    vertex.xyz += bendVec;
 }
 
 
@@ -193,6 +201,13 @@ uniform mat4 OE_GROUNDCOVER_COLOR_MATRIX ;
 in vec4 oe_layer_tilec;
 #endif
 
+//#pragma import_defines(OE_WIND_TEX, OE_WIND_TEX_MATRIX)
+//#ifdef OE_WIND_TEX
+//uniform sampler2D OE_WIND_TEX ;
+//uniform mat4 OE_WIND_TEX_MATRIX ;
+//in vec4 windPos;
+//#endif
+
 uniform sampler2DArray oe_GroundCover_billboardTex;
 in vec2 oe_GroundCover_texCoord;
 flat in float oe_GroundCover_atlasIndex;
@@ -208,6 +223,10 @@ void oe_Grass_FS(inout vec4 color)
 
     // paint the texture
     color = texture(oe_GroundCover_billboardTex, vec3(oe_GroundCover_texCoord, oe_GroundCover_atlasIndex)) * color;
+
+    // uncomment to see triangles
+    //if (color.a < 0.2)
+    //    color.a = 0.8;
 
     if (oe_GroundCover_A2C == 1)
     {

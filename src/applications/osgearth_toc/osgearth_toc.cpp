@@ -37,6 +37,7 @@
 #include <osgEarth/AnnotationLayer>
 #include <osgEarth/TerrainEngineNode>
 #include <osgEarth/Metrics>
+#include <osgEarth/WindLayer>
 
 using namespace osgEarth;
 using namespace osgEarth::Util;
@@ -148,12 +149,13 @@ struct ToggleMinValidValue : public osgGA::GUIEventHandler
 
 struct SetWindPoint : public osgGA::GUIEventHandler
 {
-    SetWindPoint(MapNode* mapNode, char c) : _mapNode(mapNode), _c(c)
+    SetWindPoint(MapNode* mapNode, char c) : _mapNode(mapNode), _c(c), _wind(NULL)
     {
-        osg::Node* heli = osgDB::readNodeFile("D:/mak/helicopter.osgb.(10,10,10).scale");
-        xform = new GeoTransform();
-        xform->addChild(heli);
-        mapNode->addChild(xform);
+        //osg::Node* heli = osgDB::readNodeFile("D:/mak/helicopter.osgb.(10,10,10).scale");
+        osg::Node* heli = osgDB::readNodeFile("../data/red_flag.osg");
+        _xform = new GeoTransform();
+        _xform->addChild(heli);
+        mapNode->addChild(_xform);
     }
     bool handle(const osgGA::GUIEventAdapter& ea, osgGA::GUIActionAdapter& aa, osg::Object*, osg::NodeVisitor*)
     {
@@ -162,20 +164,71 @@ struct SetWindPoint : public osgGA::GUIEventHandler
             osg::Vec3d world;
             if (s_mapNode->getTerrain()->getWorldCoordsUnderMouse(aa.asView(), ea.getX(), ea.getY(), world))
             {
-                osg::Uniform* u = s_mapNode->getOrCreateStateSet()->getOrCreateUniform("actorPos", osg::Uniform::FLOAT_VEC3);
-                u->set(osg::Vec3(world));
+                if (!_wind)
+                {
+                    WindLayer* layer = s_mapNode->getMap()->getLayer<WindLayer>();
+                    if (layer)
+                    {
+                        _wind = new Wind();
+                        _wind->type() = Wind::TYPE_POINT;
+                        _wind->power() = 50.0;
+                        layer->addWind(_wind);
+                    }
+                }
+
                 GeoPoint p;
                 p.fromWorld(s_mapNode->getMapSRS(), world);
-                p.alt() = 3.0;
+                p.alt() = 10.0;
                 p.altitudeMode() = ALTMODE_RELATIVE;
-                xform->setPosition(p);
+                _xform->setPosition(p);
+
+                p.makeAbsolute(s_mapNode->getTerrain());
+                p.toWorld(world);
+                _wind->point() = world;
             }
+            else OE_WARN << "Try again, no intersection :(" << std::endl;
         }
+        else if (ea.getEventType() == ea.FRAME)
+        {
+            if (_wind)
+            {
+                GeoPoint p = _xform->getPosition();
+                p.alt() = 3.0 + 25.0 + 25.0*sin((double)(aa.asView()->getFrameStamp()->getFrameNumber())/60.0);
+                //p.alt() = 2.0;
+                _xform->setPosition(p);
+
+                osg::Vec3d world;
+                p.makeAbsolute(s_mapNode->getTerrain());
+                p.toWorld(world);
+                _wind->point() = world;
+            }
+
+            //if (_wind)
+            //{
+            //    osg::Vec3d world;
+            //    if (s_mapNode->getTerrain()->getWorldCoordsUnderMouse(aa.asView(), ea.getX(), ea.getY(), world))
+            //    {
+            //        osg::Vec3d n = world;
+            //        n.normalize();
+            //        world += n*1.0;
+            //        _wind->point() = world;
+            //    }
+            //}
+
+            //osg::Vec3d eye,center,up;
+            //aa.asView()->getCamera()->getViewMatrixAsLookAt(eye,center,up);
+            //if (_wind)
+            //    {
+            //      OE_WARN << (_wind->point().get() - eye).length() << std::endl;
+            //    }
+        }
+
         return false;
     }
     char _c;
     MapNode* _mapNode;
-    GeoTransform* xform;
+    GeoTransform* _xform;
+    Wind* _wind;
 };
 
 struct DumpLabel : public osgGA::GUIEventHandler
