@@ -31,10 +31,11 @@ using namespace osgEarth;
 
 REGISTER_OSGEARTH_LAYER(wind, WindLayer);
 
+// texture size (3D) -- in view space. A larger Z dimension (which cooresponds
+// to your camera look vector) seesm to help with aliasing.
 #define WIND_DIM_X 8
 #define WIND_DIM_Y 8
 #define WIND_DIM_Z 16
-#define RADIUS 75
 
 //........................................................................
 
@@ -47,6 +48,7 @@ namespace
         GLfloat speed;
     };
 
+    // GL data that must be stored per-graphics-context
     struct DrawState
     {
         DrawState() :
@@ -57,99 +59,160 @@ namespace
         osg::GLintptr _bufferSize;
     };
 
+    // Data stored per-camera
     struct CameraState
     {
         CameraState() :
-            _windData(NULL), 
+            _windData(NULL),
             _numWindsAllocated(0) { }
+
+        ~CameraState();
 
         WindData* _windData;
         unsigned _numWindsAllocated;
 
+        osg::ref_ptr<osg::StateSet> _computeStateSet;
         osg::ref_ptr<osg::Uniform> _viewToTexMatrix;
+
+        osg::ref_ptr<osg::StateSet> _sharedStateSet;
         osg::ref_ptr<osg::Uniform> _texToViewMatrix;
-        osg::ref_ptr<osg::StateSet> _stateSet;
-        osg::ref_ptr<osg::Texture3D> _texture;
     };
 
+    typedef PerObjectFastMap<const osg::Camera*, CameraState> CameraStates;
+
+    struct CameraState_ReleaseGLObjects : public CameraStates::Functor
+    {
+        osg::State* _state;
+        CameraState_ReleaseGLObjects(osg::State* state) : _state(state) { }
+        void operator()(CameraState& cs)
+        {
+            if (cs._computeStateSet.valid())
+                cs._computeStateSet->releaseGLObjects(_state);
+            if (cs._sharedStateSet.valid())
+                cs._sharedStateSet->releaseGLObjects(_state);
+        }
+    };
+
+    CameraState::~CameraState()
+    {
+        if (_windData)
+            delete[] _windData;
+
+        CameraState_ReleaseGLObjects r(NULL);
+        r(*this);
+    }
+
+
+    struct WindDrawable;
+
+
+    // Helpers that picks a stateset based on the traversing camera. 
+    struct StateSwitcherCullCallback : public osg::NodeCallback
+    {
+        WindDrawable* _d;
+        StateSwitcherCullCallback(WindDrawable* d) : _d(d) { }
+        void operator()(osg::Node* node, osg::NodeVisitor* nv);
+    };
+    struct StateSwitcher : public osg::Group
+    {
+        StateSwitcher(WindDrawable* d)
+        {
+            setCullingActive(false);
+            setCullCallback(new StateSwitcherCullCallback(d));
+        }
+    };
+
+    //! Drawable that runs the compute shader to populate our wind texture.
     struct WindDrawable : public osg::Drawable
     {
     public:
-        WindDrawable();
+        WindDrawable(const osgDB::Options* readOptions);
 
-        void setup(const osgDB::Options* readOptions);
-
+        void setupPerCameraState(const osg::Camera* camera, int textureImageUnit);
         void drawImplementation(osg::RenderInfo& ri) const;
-
-        void compileGLObjects(osg::RenderInfo& ri) const;
+        void compileGLObjects(osg::RenderInfo& ri, DrawState& ds) const;
         void releaseGLObjects(osg::State* state) const;
         void resizeGLObjectBuffers(unsigned maxSize);
-        void updateBuffers(const osg::Camera* camera);
+        void updateBuffers(CameraState&, const osg::Camera*);
 
         osg::ref_ptr<const osgDB::Options> _readOptions;
-
+        osg::ref_ptr<osg::Program> _computeProgram;
         std::vector<osg::ref_ptr<Wind> > _winds;
-
         mutable osg::buffered_object<DrawState> _ds;
-
-        mutable CameraState _cs;
+        mutable CameraStates _cameraState;
     };
 
-    WindDrawable::WindDrawable()
+    void StateSwitcherCullCallback::operator()(osg::Node* node, osg::NodeVisitor* nv)
+    {
+        osgUtil::CullVisitor* cv = static_cast<osgUtil::CullVisitor*>(nv);
+        const osg::Camera* camera = cv->getCurrentCamera();
+        CameraState& cs = _d->_cameraState.get(camera); // should exist by now
+        cv->pushStateSet(cs._computeStateSet.get());
+        traverse(node, nv);
+        cv->popStateSet();
+    }
+
+    WindDrawable::WindDrawable(const osgDB::Options* readOptions)
     {
         setCullingActive(false);
         setDataVariance(osg::Object::DYNAMIC); // so we can update the wind instances synchronously
+
+        Shaders shaders;
+        std::string source = ShaderLoader::load(shaders.WindComputer, shaders, readOptions);
+        osg::Shader* computeShader = new osg::Shader(osg::Shader::COMPUTE, source);
+        _computeProgram = new osg::Program();
+        _computeProgram->addShader(computeShader);
     }
 
-    void WindDrawable::setup(const osgDB::Options* readOptions)
+    void WindDrawable::setupPerCameraState(const osg::Camera* camera, int textureImageUnit)
     {
-        //TODO: make this per-camera state
-        osg::StateSet* computeSS = getOrCreateStateSet();
+        // wind texture
+        osg::Texture3D* tex = new osg::Texture3D();
+        tex->setTextureSize(WIND_DIM_X, WIND_DIM_Y, WIND_DIM_Z);
+        tex->setInternalFormat(GL_RGBA8);
+        tex->setFilter(osg::Texture::MIN_FILTER, osg::Texture::LINEAR);
+        tex->setFilter(osg::Texture::MAG_FILTER, osg::Texture::LINEAR);
+        tex->setWrap(osg::Texture::WRAP_S, osg::Texture::CLAMP_TO_EDGE);
+        tex->setWrap(osg::Texture::WRAP_T, osg::Texture::CLAMP_TO_EDGE);
+        tex->setWrap(osg::Texture::WRAP_R, osg::Texture::CLAMP_TO_EDGE);
 
-        // Install the compute shader that will generate the texture
-        Shaders shaders;
-        std::string source = ShaderLoader::load(shaders.WindComputer, shaders, _readOptions.get());
-        osg::Shader* computeShader = new osg::Shader(osg::Shader::COMPUTE, source);
-        osg::Program* program = new osg::Program();
-        program->addShader(computeShader);
-        computeSS->setAttribute(program, 1);
+        // state set for the compute program that populates the wind texture
+        CameraState& cs = _cameraState.get(camera);
+        cs._computeStateSet = new osg::StateSet();
+        cs._computeStateSet->setAttribute(_computeProgram.get(), 1);        
 
-        // Make our wind texture
-        // TODO: move this to the per-camera stateset
-        CameraState& cs = _cs;
-
-        cs._texture = new osg::Texture3D();
-        cs._texture->setTextureSize(WIND_DIM_X, WIND_DIM_Y, WIND_DIM_Z);
-        cs._texture->setInternalFormat(GL_RGBA8);
-        cs._texture->setFilter(osg::Texture::MIN_FILTER, osg::Texture::LINEAR);
-        cs._texture->setFilter(osg::Texture::MAG_FILTER, osg::Texture::LINEAR);
-        cs._texture->setWrap(osg::Texture::WRAP_S, osg::Texture::CLAMP_TO_EDGE);
-        cs._texture->setWrap(osg::Texture::WRAP_T, osg::Texture::CLAMP_TO_EDGE);
-        cs._texture->setWrap(osg::Texture::WRAP_R, osg::Texture::CLAMP_TO_EDGE);
-
-        // binding so the compute shader can write to the texture
-        computeSS->addUniform(new osg::Uniform("oe_wind_tex", 0));
-        computeSS->setAttribute(new osg::BindImageTexture(0, cs._texture.get(), osg::BindImageTexture::WRITE_ONLY, GL_RGBA8, 0, GL_TRUE));
-
-        //_matrixUniform = new osg::Uniform("oe_wind_matrix", osg::Matrixf::identity());
-        //ss->addUniform(_matrixUniform.get()); // remove this...
-        // no add; done in the sharedstateset
+        // Binding so the compute shader can write to the texture.
+        // Note, setting "layered=GL_TRUE" is required to bind the entire 3D texture.
+        cs._computeStateSet->addUniform(new osg::Uniform("oe_wind_tex", 0));
+        cs._computeStateSet->setAttribute(new osg::BindImageTexture(0, tex, osg::BindImageTexture::WRITE_ONLY, GL_RGBA8, 0, GL_TRUE));
 
         cs._texToViewMatrix = new osg::Uniform("oe_wind_texToViewMatrix", osg::Matrixf::identity());
-        computeSS->addUniform(cs._texToViewMatrix.get());
+        cs._computeStateSet->addUniform(cs._texToViewMatrix.get());
 
-        computeSS->setRenderBinDetails(-90210, "RenderBin");
+        cs._computeStateSet->setRenderBinDetails(-90210, "RenderBin"); // necessary? probably not
+
+
+        // Shared stateset using during the cull traversal
+        // that gives the rest of the Map access to the computed wind texture.
+        cs._sharedStateSet = new osg::StateSet();
+
+        cs._viewToTexMatrix = new osg::Uniform("oe_wind_matrix", osg::Matrixf::identity());
+        cs._sharedStateSet->addUniform(cs._viewToTexMatrix.get());
+        cs._sharedStateSet->setDefine("OE_WIND_TEX_MATRIX", "oe_wind_matrix");
+
+        cs._sharedStateSet->addUniform(new osg::Uniform("oe_wind_tex", textureImageUnit));
+        cs._sharedStateSet->setTextureAttribute(textureImageUnit, tex, osg::StateAttribute::ON);
+        cs._sharedStateSet->setDefine("OE_WIND_TEX", "oe_wind_tex");
     }
 
-    void WindDrawable::compileGLObjects(osg::RenderInfo& ri) const
+    void WindDrawable::compileGLObjects(osg::RenderInfo& ri, DrawState& ds) const
     {
         osg::State* state = ri.getState();
         if (state)
         {
             osg::GLExtensions* ext = state->get<osg::GLExtensions>();
 
-            DrawState& ds = _ds[state->getContextID()];
-            CameraState& cs = _cs;
+            CameraState& cs = _cameraState.get(ri.getCurrentCamera());
 
             GLuint requiredBufferSize = sizeof(WindData) * (_winds.size()+1);
 
@@ -172,10 +235,8 @@ namespace
         }
     }
 
-    void WindDrawable::updateBuffers(const osg::Camera* camera)
+    void WindDrawable::updateBuffers(CameraState& cs, const osg::Camera* camera)
     {
-        CameraState& cs = _cs;
-
         if (cs._numWindsAllocated < _winds.size()+1)
         {
             if (cs._windData != NULL)
@@ -227,12 +288,28 @@ namespace
 
     void WindDrawable::releaseGLObjects(osg::State* state) const
     {
-        //TODO
+        if (state)
+        {
+            DrawState& ds = _ds[state->getContextID()];
+            if (ds._buffer != INT_MAX)
+            {
+                osg::GLExtensions* ext = state->get<osg::GLExtensions>();
+                ext->glDeleteBuffers(1, &ds._buffer);
+            }
+
+            CameraState_ReleaseGLObjects r(state);
+            _cameraState.forEach(r);
+        }
+        else
+        {
+            _cameraState.clear();
+        }
     }
 
     void WindDrawable::resizeGLObjectBuffers(unsigned maxSize)
     {
         _ds.resize(maxSize);
+        _cameraState.clear();
     }
 
     void WindDrawable::drawImplementation(osg::RenderInfo& ri) const
@@ -241,7 +318,7 @@ namespace
         osg::GLExtensions* ext = ri.getState()->get<osg::GLExtensions>();
 
         // update buffer with wind data
-        compileGLObjects(ri);
+        compileGLObjects(ri, ds);
 
         // activate layout() binding point:
         ext->glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, ds._buffer);
@@ -260,7 +337,7 @@ namespace
 Wind::Wind() :
     _type(TYPE_DIRECTIONAL),
     _direction(osg::Vec2f(1,0)),
-    _speed(Speed(5.0, Units::KNOTS)),
+    _speed(Speed(3.0, Units::KNOTS)),
     _pointWorld(osg::Vec3d(0,0,0))
 {
     //nop
@@ -300,6 +377,8 @@ Config
 WindLayer::Options::getConfig() const
 {
     Config conf = Layer::Options::getConfig();
+    conf.set("ortho", ortho());
+    conf.set("radius", radius());
     if (!winds().empty())
     {
         Config windsConf("winds");
@@ -318,8 +397,11 @@ void
 WindLayer::Options::fromConfig(const Config& conf)
 {
     ortho().setDefault(true);
+    radius().setDefault(75.0f);
     winds().clear();
 
+    conf.get("ortho", ortho());
+    conf.get("radius", radius());
     const ConfigSet windsConf = conf.child("winds").children();
     for(ConfigSet::const_iterator i = windsConf.begin(); i != windsConf.end(); ++i)
     {
@@ -344,14 +426,12 @@ WindLayer::init()
 
     // Never cache decals
     layerHints().cachePolicy() = CachePolicy::NO_CACHE;
-
-    _radius = RADIUS;
 }
 
 osg::Node*
 WindLayer::getNode() const
 {
-    return _drawable.get();
+    return _node.get();
 }
 
 void
@@ -360,9 +440,12 @@ WindLayer::setTerrainResources(TerrainResources* res)
     res->reserveTextureImageUnit(_unit, "WindLayer");
 
     // Create the wind drawable that will provide a wind texture
-    WindDrawable* wd = new WindDrawable();
-    wd->setup(getReadOptions());
+    WindDrawable* wd = new WindDrawable(getReadOptions());
     _drawable = wd;
+
+    // chooses the right per-camera stateset for the compute shader
+    _node = new StateSwitcher(wd);
+    _node->addChild(wd);
 
 #if 0 // TESTING
     Wind* wind = new Wind();
@@ -391,20 +474,21 @@ WindLayer::getSharedStateSet(osg::NodeVisitor* nv) const
 
     WindDrawable* windDrawable = static_cast<WindDrawable*>(_drawable.get());
 
-    CameraState& cs = windDrawable->_cs;
+    const osg::Camera* camera = cv->getCurrentCamera();
+    CameraState& cs = windDrawable->_cameraState.get(camera);
 
-    //todo: per camera
-    if (!cs._stateSet.valid())
+    if (!cs._computeStateSet.valid())
     {
-        cs._stateSet = new osg::StateSet();
+        windDrawable->setupPerCameraState(camera, _unit.unit());
+        //cs._stateSet = new osg::StateSet();
 
-        cs._viewToTexMatrix = new osg::Uniform("oe_wind_matrix", osg::Matrixf::identity());
-        cs._stateSet->addUniform(cs._viewToTexMatrix.get());
-        cs._stateSet->setDefine("OE_WIND_TEX_MATRIX", "oe_wind_matrix");
+        //cs._viewToTexMatrix = new osg::Uniform("oe_wind_matrix", osg::Matrixf::identity());
+        //cs._stateSet->addUniform(cs._viewToTexMatrix.get());
+        //cs._stateSet->setDefine("OE_WIND_TEX_MATRIX", "oe_wind_matrix");
 
-        cs._stateSet->addUniform(new osg::Uniform("oe_wind_tex", _unit.unit()));
-        cs._stateSet->setTextureAttribute(_unit.unit(), cs._texture.get(), osg::StateAttribute::ON);
-        cs._stateSet->setDefine("OE_WIND_TEX", "oe_wind_tex");
+        //cs._stateSet->addUniform(new osg::Uniform("oe_wind_tex", _unit.unit()));
+        //cs._stateSet->setTextureAttribute(_unit.unit(), cs._texture.get(), osg::StateAttribute::ON);
+        //cs._stateSet->setDefine("OE_WIND_TEX", "oe_wind_tex");
     }
 
     // this xforms from clip [-1..1] to texture [0..1] space
@@ -414,20 +498,19 @@ WindLayer::getSharedStateSet(osg::NodeVisitor* nv) const
 
     osg::Matrix rttProjection;
 
+    double R = options().radius()->as(Units::METERS);
+
     if (options().ortho() == true)
     {
-        rttProjection = osg::Matrix::ortho(
-            -_radius, _radius,
-            -_radius, _radius,
-            0, _radius);
+        rttProjection = osg::Matrix::ortho(-R, R, -R, R, 0, R);
     }
     else
     { 
         double y,a,n,f;
-        cv->getCurrentCamera()->getProjectionMatrix().getPerspective(y,a,n,f);
+        camera->getProjectionMatrix().getPerspective(y,a,n,f);
 
         // pushing the NEAR out reduces jitter a lot
-        rttProjection.makePerspective(y, a, 5.0, _radius);
+        rttProjection.makePerspective(y, a, 5.0, R);
     }
 
     // view to texture:
@@ -439,7 +522,7 @@ WindLayer::getSharedStateSet(osg::NodeVisitor* nv) const
     textureToCamView.invert(camViewToTexture);
     cs._texToViewMatrix->set(textureToCamView);
 
-    windDrawable->updateBuffers(cv->getCurrentCamera());
+    windDrawable->updateBuffers(cs, camera);
 
-    return cs._stateSet.get();
+    return cs._sharedStateSet.get();
 }

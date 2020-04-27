@@ -25,8 +25,6 @@
 
 namespace osgEarth
 {
-    class GeoTransform;
-
     /**
      * A wind, either DIRECTIONAL (blows in a local direction at all points)
      * or POINT (blows in all directions from a specific point)
@@ -88,6 +86,7 @@ namespace osgEarth
             META_LayerOptions(osgEarth, Options, Layer::Options);
             OE_OPTION_VECTOR(osg::ref_ptr<Wind>, winds);
             OE_OPTION(bool, ortho);
+            OE_OPTION(Distance, radius);
             virtual Config getConfig() const;
         private:
             void fromConfig(const Config& conf);
@@ -110,7 +109,8 @@ namespace osgEarth
         osg::StateSet* getSharedStateSet(osg::NodeVisitor* nv) const;
 
     private:
-        osg::ref_ptr<osg::Drawable> _drawable;
+        osg::ref_ptr<osg::Group> _node;
+        osg::ref_ptr<osg::Node> _drawable;
         TextureImageUnitReservation _unit;
 
         // todo: local per camera
