@@ -95,7 +95,11 @@ namespace osgEarth
     public:
         META_Layer(osgEarth, WindLayer, Options, Layer, Wind);
 
+        //! Adds a new wind to the layer
         void addWind(Wind*);
+
+        //! Removed an existing wind from the layer
+        void removeWind(Wind*);
 
     protected: // Layer
 

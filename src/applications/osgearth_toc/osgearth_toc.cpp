@@ -164,9 +164,9 @@ struct SetWindPoint : public osgGA::GUIEventHandler
             osg::Vec3d world;
             if (s_mapNode->getTerrain()->getWorldCoordsUnderMouse(aa.asView(), ea.getX(), ea.getY(), world))
             {
+                WindLayer* layer = s_mapNode->getMap()->getLayer<WindLayer>();
                 if (!_wind)
                 {
-                    WindLayer* layer = s_mapNode->getMap()->getLayer<WindLayer>();
                     if (layer)
                     {
                         _wind = new Wind();
@@ -174,16 +174,21 @@ struct SetWindPoint : public osgGA::GUIEventHandler
                         _wind->setSpeed(Speed(125.0, Units::KILOMETERS_PER_HOUR));
                         layer->addWind(_wind);
                     }
+
+                    GeoPoint p;
+                    p.fromWorld(s_mapNode->getMapSRS(), world);
+                    p.alt() = 50.0;
+                    p.altitudeMode() = ALTMODE_RELATIVE;
+                    _xform->setPosition(p);
+
+                    p.makeAbsolute(s_mapNode->getTerrain());
+                    _wind->setPoint(p);
                 }
-
-                GeoPoint p;
-                p.fromWorld(s_mapNode->getMapSRS(), world);
-                p.alt() = 50.0;
-                p.altitudeMode() = ALTMODE_RELATIVE;
-                _xform->setPosition(p);
-
-                p.makeAbsolute(s_mapNode->getTerrain());
-                _wind->setPoint(p);
+                else
+                {
+                    layer->removeWind(_wind);
+                    _wind = NULL;
+                }
             }
             else OE_WARN << "Try again, no intersection :(" << std::endl;
         }

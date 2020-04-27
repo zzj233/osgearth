@@ -420,6 +420,22 @@ WindLayer::addWind(Wind* wind)
 }
 
 void
+WindLayer::removeWind(Wind* wind)
+{
+    WindDrawable* wd = static_cast<WindDrawable*>(_drawable.get());
+    for(std::vector<osg::ref_ptr<Wind> >::iterator i = wd->_winds.begin();
+        i != wd->_winds.end();
+        ++i)
+    {
+        if (i->get() == wind)
+        {
+            wd->_winds.erase(i);
+            break;
+        }
+    }
+}
+
+void
 WindLayer::init()
 {
     Layer::init();
@@ -480,15 +496,6 @@ WindLayer::getSharedStateSet(osg::NodeVisitor* nv) const
     if (!cs._computeStateSet.valid())
     {
         windDrawable->setupPerCameraState(camera, _unit.unit());
-        //cs._stateSet = new osg::StateSet();
-
-        //cs._viewToTexMatrix = new osg::Uniform("oe_wind_matrix", osg::Matrixf::identity());
-        //cs._stateSet->addUniform(cs._viewToTexMatrix.get());
-        //cs._stateSet->setDefine("OE_WIND_TEX_MATRIX", "oe_wind_matrix");
-
-        //cs._stateSet->addUniform(new osg::Uniform("oe_wind_tex", _unit.unit()));
-        //cs._stateSet->setTextureAttribute(_unit.unit(), cs._texture.get(), osg::StateAttribute::ON);
-        //cs._stateSet->setDefine("OE_WIND_TEX", "oe_wind_tex");
     }
 
     // this xforms from clip [-1..1] to texture [0..1] space
