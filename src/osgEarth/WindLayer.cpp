@@ -44,7 +44,7 @@ namespace
     {
         GLfloat position[4];
         GLfloat direction[3];
-        GLfloat power;
+        GLfloat speed;
     };
 
     struct DrawState
@@ -196,7 +196,7 @@ namespace
             if (wind->type() == Wind::TYPE_POINT)
             {
                 // transform from world to camera-view space
-                osg::Vec3d posView =  wind->point().get() * camera->getViewMatrix();
+                osg::Vec3d posView =  wind->getPointWorld() * camera->getViewMatrix();
 
                 cs._windData[i].position[0] = posView.x();
                 cs._windData[i].position[1] = posView.y();
@@ -218,11 +218,11 @@ namespace
                 cs._windData[i].position[3] = 0.0f;
             }
 
-            cs._windData[i].power = wind->power().get();
+            cs._windData[i].speed = wind->speed()->as(Units::KNOTS);
         }
 
         // terminator record: set power to negative.
-        cs._windData[i].power = -1.0f;
+        cs._windData[i].speed = -1.0f;
     }
 
     void WindDrawable::releaseGLObjects(osg::State* state) const
@@ -260,56 +260,17 @@ namespace
 Wind::Wind() :
     _type(TYPE_DIRECTIONAL),
     _direction(osg::Vec2f(1,0)),
-    _power(0.5f),
-    _point(osg::Vec3d(0,0,0))
+    _speed(Speed(5.0, Units::KNOTS)),
+    _pointWorld(osg::Vec3d(0,0,0))
 {
     //nop
 }
 
-template<> inline
-void Config::set<osg::Vec2f>(const std::string& key, const optional<osg::Vec2f>& opt) {
-    remove(key);
-    if (opt.isSet()) {
-        Config conf(key);
-        conf.set("x", Stringify() << std::setprecision(8) << opt->x());
-        conf.set("y", Stringify() << std::setprecision(8) << opt->y());
-        add(conf);
-    }
-}
-
-template<> inline
-bool Config::get<osg::Vec2f>(const std::string& key, optional<osg::Vec2f>& output) const {
-    if (hasChild(key)) {
-        output->x() = as<float>(child(key).value("x"), 0.0f);
-        output->y() = as<float>(child(key).value("y"), 0.0f);
-        return true;
-    }
-    else
-        return false;
-}
-
-template<> inline
-void Config::set<osg::Vec3d>(const std::string& key, const optional<osg::Vec3d>& opt) {
-    remove(key);
-    if (opt.isSet()) {
-        Config conf(key);
-        conf.set("x", Stringify() << std::setprecision(16) << opt->x());
-        conf.set("y", Stringify() << std::setprecision(16) << opt->y());
-        conf.set("z", Stringify() << std::setprecision(16) << opt->z());
-        add(conf);
-    }
-}
-
-template<> inline
-bool Config::get<osg::Vec3d>(const std::string& key, optional<osg::Vec3d>& output) const {
-    if (hasChild(key)) {
-        output->x() = as<double>(value("x"), 0.0);
-        output->y() = as<double>(value("y"), 0.0);
-        output->z() = as<double>(value("z"), 0.0);
-        return true;
-    }
-    else
-        return false;
+void
+Wind::setPoint(const GeoPoint& point)
+{
+    _point = point;
+    point.toWorld(_pointWorld);
 }
 
 Wind::Wind(const Config& conf)
@@ -318,18 +279,18 @@ Wind::Wind(const Config& conf)
     conf.get("type", "directional", type(), TYPE_DIRECTIONAL);
     conf.get("point", point());
     conf.get("direction", direction());
-    conf.get("power", power());
+    conf.get("speed", speed());
 }
 
 Config
 Wind::getConfig() const
 {
-    Config conf;
+    Config conf("wind");
     conf.set("type", "point", type(), TYPE_POINT);
     conf.set("type", "directional", type(), TYPE_DIRECTIONAL);
     conf.set("point", point());
     conf.set("direction", direction());
-    conf.set("power", power());
+    conf.set("speed", speed());
     return conf;
 }
 
@@ -339,13 +300,26 @@ Config
 WindLayer::Options::getConfig() const
 {
     Config conf = Layer::Options::getConfig();
-        
+    if (!winds().empty())
+    {
+        Config windsConf("winds");
+        for(std::vector<osg::ref_ptr<Wind> >::const_iterator i = winds().begin();
+            i != winds().end();
+            ++i)
+        {
+            windsConf.add("wind", i->get()->getConfig());
+        }
+        conf.add(windsConf);
+    }
     return conf;
 }
 
 void
 WindLayer::Options::fromConfig(const Config& conf)
 {
+    ortho().setDefault(true);
+    winds().clear();
+
     const ConfigSet windsConf = conf.child("winds").children();
     for(ConfigSet::const_iterator i = windsConf.begin(); i != windsConf.end(); ++i)
     {
@@ -390,17 +364,17 @@ WindLayer::setTerrainResources(TerrainResources* res)
     wd->setup(getReadOptions());
     _drawable = wd;
 
-#if 0
+#if 0 // TESTING
     Wind* wind = new Wind();
     wind->type() = Wind::TYPE_DIRECTIONAL;
     wind->direction()->set(-1.0f, 0.0f);
-    wind->power() = 10.0f;
+    wind->speed()->set(10, Units::KNOTS);
     addWind(wind);
 
     Wind* wind2 = new Wind();
     wind2->type() = Wind::TYPE_DIRECTIONAL;
     wind2->direction()->set(0.0f, -1.0f);
-    wind2->power() = 10.0f;
+    wind2->speed()->set(10, Units::KNOTS);
     addWind(wind2);
 #endif
 
@@ -438,37 +412,29 @@ WindLayer::getSharedStateSet(osg::NodeVisitor* nv) const
         osg::Matrix::translate(1.0,1.0,1.0) * 
         osg::Matrix::scale(0.5,0.5,0.5);
 
-    osg::Matrix rttView, rttProjection;
+    osg::Matrix rttProjection;
 
-    double y,a,n,f;
-    cv->getCurrentCamera()->getProjectionMatrix().getPerspective(y,a,n,f);
+    if (options().ortho() == true)
+    {
+        rttProjection = osg::Matrix::ortho(
+            -_radius, _radius,
+            -_radius, _radius,
+            0, _radius);
+    }
+    else
+    { 
+        double y,a,n,f;
+        cv->getCurrentCamera()->getProjectionMatrix().getPerspective(y,a,n,f);
 
-    rttProjection = osg::Matrix::ortho(
-        -_radius, _radius,
-        -_radius, _radius,
-        -_radius, _radius);
-
-    //osg::Matrix camInvView = cv->getCurrentCamera()->getInverseViewMatrix();
-
-    //osg::Vec3d eye, center, up;
-    //cv->getCurrentCamera()->getViewMatrixAsLookAt(eye, center, up);
-    //center.set(0,0,0); // geocentric only -- straight down.
-
-    //rttView = osg::Matrix::lookAt(eye, center, up);
-
-    //TESTING
-    //rttView = cv->getCurrentCamera()->getViewMatrix();
-    rttProjection.makePerspective(y,a,5.0,_radius); // near of 2m is interesting, but reduces jitter A LOT
-    //rttProjection = cv->getCurrentCamera()->getProjectionMatrix();
-    osg::Matrix camViewToTexture = rttProjection * clipToTexture;
-
-    //camViewToTexture = cv->getCurrentCamera()->getProjectionMatrix() * clipToTexture;
+        // pushing the NEAR out reduces jitter a lot
+        rttProjection.makePerspective(y, a, 5.0, _radius);
+    }
 
     // view to texture:
-    //osg::Matrix camViewToTexture = camInvView * rttView * rttProjection * clipToTexture;
+    osg::Matrix camViewToTexture = rttProjection * clipToTexture;
     cs._viewToTexMatrix->set(camViewToTexture);
 
-    // and back:
+    // texture to view (for the compute shader):
     osg::Matrix textureToCamView;
     textureToCamView.invert(camViewToTexture);
     cs._texToViewMatrix->set(textureToCamView);

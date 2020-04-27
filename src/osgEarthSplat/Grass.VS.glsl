@@ -44,7 +44,7 @@ uniform float oe_GroundCover_maxDistance; // distance at which flora disappears
 #ifdef OE_WIND_TEX
 uniform sampler3D OE_WIND_TEX ;
 uniform mat4 OE_WIND_TEX_MATRIX ;
-#define MAX_WIND_SPEED 50.0
+#define MAX_WIND_SPEED 50.0  // meters per second
 #endif
 
 #ifdef OE_GROUNDCOVER_USE_ACTOR
