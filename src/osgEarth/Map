@@ -161,6 +161,7 @@ namespace osgEarth
 
         //! Access to an elevation sampling service tied to this map
         ElevationPool* getElevationPool() const;
+        ElevationPool2* getElevationPool2() const;
 
         //! Returns true if data for the given tile key and layers is likely
         //! to generate data quickly. This is used for pager thread pool shunting.
@@ -210,6 +211,7 @@ namespace osgEarth
         Revision _dataModelRevision;
         osg::ref_ptr<osgDB::Options> _readOptions;
         osg::ref_ptr<ElevationPool> _elevationPool;
+        mutable ElevationPool2 _elevationPool2;
 
         struct LayerCB : public LayerCallback {
             LayerCB(Map*);

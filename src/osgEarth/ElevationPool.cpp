@@ -19,6 +19,9 @@
 #include <osgEarth/ElevationPool>
 #include <osgEarth/Map>
 #include <osgEarth/Metrics>
+#include <osgEarth/rtree.h>
+#include <osgEarth/HeightFieldUtils>
+#include <osgEarth/Registry>
 
 using namespace osgEarth;
 
@@ -782,4 +785,453 @@ ElevationEnvelope::collectDataExtents()
             << std::endl;
     }
 #endif
+}
+
+//...................................................................
+
+namespace
+{
+    // octohodreal normal packing
+    osg::Vec2 packNormal(const osg::Vec3& v)
+    {
+        osg::Vec2 p;
+        float d = 1.0/(fabs(v.x())+fabs(v.y())+fabs(v.z()));
+        p.x() = v.x() * d;
+        p.y() = v.y() * d;
+
+        if (v.z() < 0.0)
+        {
+            p.x() = (1.0 - fabs(p.y())) * (p.x() >= 0.0? 1.0 : -1.0);
+            p.y() = (1.0 - fabs(p.x())) * (p.y() >= 0.0? 1.0 : -1.0);
+        }
+
+        p.x() = 0.5f*(p.x()+1.0f);
+        p.y() = 0.5f*(p.y()+1.0f);
+
+        return p;
+    }
+}
+
+ElevationTexture::ElevationTexture(const GeoHeightField& in_hf, const NormalMap* normalMap) :
+    _extent(in_hf.getExtent())
+{
+    if (in_hf.valid())
+    {
+        const osg::HeightField* hf = in_hf.getHeightField();
+        osg::Vec4 value;
+
+        osg::Image* heights = new osg::Image();
+        heights->allocateImage(hf->getNumColumns(), hf->getNumRows(), 1, GL_RED, GL_FLOAT);
+        heights->setInternalTextureFormat(GL_R32F);
+
+        ImageUtils::PixelWriter write(heights);
+        // TODO: speed this up since we know the format
+        for(unsigned row=0; row<hf->getNumRows(); ++row)
+        {
+            for(unsigned col=0; col<hf->getNumColumns(); ++col)
+            {
+                value.r() = hf->getHeight(col, row);
+                write(value, col, row);
+            }
+        }
+        setImage(heights);
+
+        setDataVariance(osg::Object::STATIC);
+        setInternalFormat(GL_R32F);
+        setFilter(osg::Texture::MAG_FILTER, osg::Texture::LINEAR);
+        setFilter(osg::Texture::MIN_FILTER, osg::Texture::NEAREST);
+        setWrap(osg::Texture::WRAP_S, osg::Texture::CLAMP_TO_EDGE);
+        setWrap(osg::Texture::WRAP_T, osg::Texture::CLAMP_TO_EDGE);
+        setResizeNonPowerOfTwoHint(false);
+        setMaxAnisotropy(1.0f);
+        setUnRefImageDataAfterApply(Registry::instance()->unRefImageDataAfterApply().get());
+
+        if (normalMap)
+        {
+            osg::Image* normals = new osg::Image();
+            normals->allocateImage(normalMap->s(), normalMap->t(), 1, GL_RG, GL_UNSIGNED_BYTE);
+            normals->setInternalTextureFormat(GL_RG8);
+            ImageUtils::PixelWriter writeNormal(normals);
+
+            osg::Vec2 temp;
+            for(int t=0; t<normalMap->t(); ++t)
+            {
+                for(int s=0; s<normalMap->s(); ++s)
+                {
+                    temp = packNormal(normalMap->getNormal(s, t));
+                    value.r() = temp.x(), value.g() = temp.y();
+                    writeNormal(value, s, t);
+                }
+            }
+            _normalTex = new osg::Texture2D(normals);
+
+            _normalTex->setInternalFormat(GL_RG8);
+            _normalTex->setFilter(osg::Texture::MAG_FILTER, osg::Texture::LINEAR);
+            _normalTex->setFilter(osg::Texture::MIN_FILTER, osg::Texture::LINEAR);
+            _normalTex->setWrap(osg::Texture::WRAP_S, osg::Texture::CLAMP_TO_EDGE);
+            _normalTex->setWrap(osg::Texture::WRAP_T, osg::Texture::CLAMP_TO_EDGE);
+            _normalTex->setResizeNonPowerOfTwoHint(false);
+            _normalTex->setMaxAnisotropy(1.0f);
+            _normalTex->setUnRefImageDataAfterApply(Registry::instance()->unRefImageDataAfterApply().get());
+        }
+
+        _read.setTexture(this);
+        _read.setSampleAsTexture(false);
+
+        _resolution = Distance(
+            getExtent().height() / ((double)(getImage(0)->s()-1)),
+            getExtent().getSRS()->getUnits());
+    }
+}
+
+ElevationTexture::~ElevationTexture()
+{
+    //nop
+}
+
+ElevationSample2
+ElevationTexture::getElevation(double x, double y) const
+{
+    double u = (x - getExtent().xMin()) / getExtent().width();
+    double v = (y - getExtent().yMin()) / getExtent().height();
+
+    return getElevationUV(u, v);
+}
+
+ElevationSample2
+ElevationTexture::getElevationUV(double u, double v) const
+{
+    osg::Vec4 value;
+    _read(value, u, v);
+    return ElevationSample2(value.r(), _resolution);
+}
+
+//...................................................................
+
+// TODO
+// - convert dataextents to the map profile before building the spatial index.
+// - create a TileKey=>ActualTileKey mapping for elevation layers that
+//   don't properly report their max levels.
+// - install timers to bnechmark queries
+// - consider using a default WorkingSet if the user doesn't supply one.
+
+ElevationPool2::ElevationPool2() :
+    _index(NULL),
+    _mapRevision(0u),
+    _tileSize(257)
+{
+    // small L2 cache
+    _L2 = new WorkingSet(16u);
+}
+
+ElevationPool2::~ElevationPool2()
+{
+    if (_L2)
+        delete _L2;
+}
+
+void
+ElevationPool2::setMap(const Map* map)
+{
+    _map = map;
+    refresh(map);
+}
+
+typedef RTree<unsigned, double, 2> MaxLevelIndex;
+
+void
+ElevationPool2::refresh(const Map* map)
+{
+    _globalLUT.lock();
+
+    if (_index)
+        delete _index;
+
+    MaxLevelIndex* index = new MaxLevelIndex();
+    _index = index;
+
+    ElevationLayerVector layers;
+    map->getLayers(layers);
+
+    double minv[2], maxv[2];
+        
+    for(auto i = layers.begin(); i != layers.end(); ++i)
+    {
+        const ElevationLayer* layer = i->get();
+        const DataExtentList& dataExtents = layer->getDataExtents();
+
+        for(auto de = dataExtents.begin(); de != dataExtents.end(); ++de)
+        {
+            GeoExtent extentInMapSRS = map->getProfile()->clampAndTransformExtent(*de);
+
+            minv[0] = extentInMapSRS.xMin(), minv[1] = extentInMapSRS.yMin();
+            maxv[0] = extentInMapSRS.xMax(), maxv[1] = extentInMapSRS.yMax();
+
+            // Check.
+            unsigned maxLevel = layer->getProfile()->getEquivalentLOD(map->getProfile(), de->maxLevel().get());
+
+            index->Insert(minv, maxv, maxLevel);
+        }
+    }
+
+    _globalLUT.clear();
+
+    _mapRevision = map->getDataModelRevision();
+
+    _globalLUT.unlock();
+}
+
+unsigned
+ElevationPool2::getLOD(double x, double y) const
+{
+    MaxLevelIndex* index = static_cast<MaxLevelIndex*>(_index);
+
+    double minv[2], maxv[2];
+    minv[0] = maxv[0] = x, minv[1] = maxv[1] = y;
+    std::vector<unsigned> hits;
+    index->Search(minv, maxv, &hits, 99);
+    unsigned maxiestMaxLevel = 0u;
+    for(auto h = hits.begin(); h != hits.end(); ++h)
+    {
+        maxiestMaxLevel = osg::maximum(maxiestMaxLevel, *h); 
+    }
+    return maxiestMaxLevel;
+}
+
+ElevationPool2::WorkingSet::WorkingSet(unsigned size) :
+    _lru(true, size)
+{
+    //nop
+}
+
+bool
+ElevationPool2::findExistingRaster(
+    const Internal::EPKey& key,
+    WorkingSet* ws,
+    osg::ref_ptr<ElevationTexture>& output,
+    bool* fromWS,
+    bool* fromL2,
+    bool* fromLUT)
+{   
+    *fromWS = false;
+    *fromL2 = false;
+    *fromLUT = false;
+
+    // First check the workingset. No mutex required since the
+    // LRU has its own mutex. (TODO: maybe just combine mutexes here)
+    if (ws)
+    {
+        WorkingSet::LRU::Record record;
+        if (ws->_lru.get(key, record))
+        {
+            OE_INFO << LC << key._tilekey.str() << " - Cache hit (Working set)" << std::endl;
+            output = record.value();
+            *fromWS = true;
+            return true;
+        }
+    }
+
+    if (_L2)
+    {
+        WorkingSet::LRU::Record record;
+        if (_L2->_lru.get(key, record))
+        {
+            OE_INFO << LC << key._tilekey.str() << " - Cache hit (L2 cache)" << std::endl;
+            output = record.value();
+            *fromL2 = true;
+            return true;
+        }
+    }
+
+    // Next check the system LUT -- see if someone somewhere else
+    // already has it (the terrain or another WorkingSet)
+    _globalLUT.lock();
+    OE_DEBUG << "Global LUT size = " << _globalLUT.size() << std::endl;
+    auto i =_globalLUT.find(key);
+    if (i != _globalLUT.end())
+    {
+        i->second.lock(output);
+        if (output.valid())
+        {
+            *fromLUT = true;
+        }
+        else
+        {
+            // observer was orphaned..remove it
+            _globalLUT.erase(i);
+        }
+    }
+    _globalLUT.unlock();
+
+    // found it, so stick it in the L2 cache
+    if (output.valid())
+    {
+        OE_INFO << LC << key._tilekey.str() << " - Cache hit (global LUT)" << std::endl;
+    }
+
+    return output.valid();
+}
+
+osg::ref_ptr<ElevationTexture>
+ElevationPool2::getOrCreateRaster(const Internal::EPKey& key, const Map* map, bool getNormalMap, WorkingSet* ws)
+{
+    // first check for pre-existing data for this key:
+    osg::ref_ptr<ElevationTexture> result;
+    bool fromWS, fromL2, fromLUT;
+    if (findExistingRaster(key, ws, result, &fromWS, &fromL2, &fromLUT))
+    {
+        // only accept if cached record matches caller's request
+        if (getNormalMap == true && result->getNormalMapTexture() == NULL)
+        {
+            result = NULL;
+        }
+    }
+
+    if (!result.valid())
+    {
+        // need to build NEW data for this key
+        osg::ref_ptr<osg::HeightField> hf = HeightFieldUtils::createReferenceHeightField(
+            key._tilekey.getExtent(),
+            _tileSize, _tileSize,
+            false,      // no border
+            true);      // initialize to HAE (0.0) heights
+
+        osg::ref_ptr<NormalMap> normalMap;
+        if (getNormalMap)
+        {
+            normalMap = new NormalMap(_tileSize, _tileSize);
+        }
+
+        ElevationLayerVector layers;
+        _map->getLayers(layers);
+
+        bool populated = layers.populateHeightFieldAndNormalMap(
+            hf.get(),
+            normalMap.get(),
+            key._tilekey,
+            map->getProfileNoVDatum(), // convertToHAE,
+            map->getElevationInterpolation(),
+            NULL ); // TODO: progress callback
+
+        if (!populated)
+        {
+            return NULL;
+        }
+
+        result = new ElevationTexture(
+            GeoHeightField(hf.get(), key._tilekey.getExtent()),
+            normalMap.get());
+    }
+
+    // update WorkingSet:
+    if (ws)
+    {
+        ws->_lru.insert(key, result.get());
+    }
+
+    // update L2
+    if (_L2)
+    {
+        _L2->_lru.insert(key, result.get());
+    }
+
+    // update system LUT:
+    if (!fromLUT)
+    {
+        _globalLUT.lock();
+        _globalLUT[key] = result.get();
+        _globalLUT.unlock();
+    }
+
+    return result;
+}
+
+ElevationSample2
+ElevationPool2::getSample(const GeoPoint& p, unsigned maxLOD, const Map* map, WorkingSet* ws)
+{
+    if (_mapRevision < map->getDataModelRevision())
+        refresh(map);
+
+    Internal::EPKey key;
+    unsigned lod = osg::minimum( getLOD(p.x(), p.y()), maxLOD );
+    key._tilekey = map->getProfile()->createTileKey(p.x(), p.y(), lod);
+    key._revision = map->getDataModelRevision();
+
+    osg::ref_ptr<ElevationTexture> raster = getOrCreateRaster(key, map, false, ws);
+
+    if (raster.valid())
+    {
+        return raster->getElevation(p.x(), p.y());
+    }
+
+    return ElevationSample2(NO_DATA_VALUE, 0.0f);
+}
+
+ElevationSample2
+ElevationPool2::getSample(const GeoPoint& p, WorkingSet* ws)
+{
+    if (!p.isValid())
+        return ElevationSample2(NO_DATA_VALUE, 0.0f);
+
+    osg::ref_ptr<const Map> map = _map.get();
+    if (!map.valid() || !map->getProfile())
+        return ElevationSample2(NO_DATA_VALUE, 0.0f);
+
+    if (!p.getSRS()->isHorizEquivalentTo(map->getProfile()->getSRS()))
+    {
+        GeoPoint xp(p);
+        xp.transformInPlace(map->getProfile()->getSRS());
+        return getSample(xp, ~0, map.get(), ws);
+    }
+    else
+    {
+        return getSample(p, ~0, map.get(), ws);
+    }
+}
+
+ElevationSample2
+ElevationPool2::getSample(const GeoPoint& p, const Distance& resolution, WorkingSet* ws)
+{
+    if (!p.isValid())
+        return ElevationSample2(NO_DATA_VALUE, 0.0f);
+
+    osg::ref_ptr<const Map> map = _map.get();
+    if (!map.valid() || !map->getProfile())
+        return ElevationSample2(NO_DATA_VALUE, 0.0f);
+
+    const int ELEV_TILE_SIZE = 257;
+
+    unsigned maxLOD = map->getProfile()->getLevelOfDetailForHorizResolution(
+        resolution.as(map->getSRS()->getUnits()),
+        ELEV_TILE_SIZE);
+
+    if (!p.getSRS()->isHorizEquivalentTo(map->getProfile()->getSRS()))
+    {
+        GeoPoint xp(p);
+        xp.transformInPlace(map->getProfile()->getSRS());
+        return getSample(xp, maxLOD, map.get(), ws);
+    }
+    else
+    {
+        return getSample(p, maxLOD, map.get(), ws);
+    }
+}
+
+bool
+ElevationPool2::getTile(const TileKey& tilekey, bool getNormalMap, osg::ref_ptr<ElevationTexture>& out_tex, WorkingSet* ws)
+{
+    osg::ref_ptr<const Map> map = _map.get();
+    if (!map.valid())
+        return false;
+
+    if (_mapRevision < map->getDataModelRevision())
+        refresh(map.get());
+
+    Internal::EPKey key;
+    key._tilekey = tilekey;
+    key._revision = _map->getDataModelRevision();
+
+    out_tex = getOrCreateRaster(key, _map.get(), getNormalMap, ws);
+
+    return true;
 }

@@ -169,6 +169,8 @@ Map::init()
     // elevation sampling
     _elevationPool = new ElevationPool();
     _elevationPool->setMap( this );
+
+    _elevationPool2.setMap( this );
 }
 
 Map::~Map()
@@ -180,6 +182,12 @@ ElevationPool*
 Map::getElevationPool() const
 {
     return _elevationPool.get();
+}
+
+ElevationPool2*
+Map::getElevationPool2() const
+{
+    return &_elevationPool2;
 }
 
 void

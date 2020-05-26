@@ -26,11 +26,184 @@
 #include <osgEarth/ThreadingUtils>
 #include <osgEarth/Containers>
 #include <osg/Timer>
+#include <osg/Texture2D>
 #include <map>
+#include <unordered_map>
 
 namespace osgEarth
 {
     using namespace Threading;
+
+    class OSGEARTH_EXPORT ElevationSample2
+    {
+    public:
+        ElevationSample2(const Distance& e, const Distance& r) : _e(e), _r(r) { }
+        const Distance& elevation() const { return _e; }
+        const Distance& resolution() const { return _r; }
+        bool valid() const { return _r > 0.0f; }
+    private:
+        Distance _e, _r;
+    };
+
+    // CONTAINER for elevation data on the system "somewhere".
+    // could be HF, could be image, could be texture .....
+    // for now, let's say it's a heightfield.
+    // abstract that away with the API.
+    // GL_R16F value
+    // Encoded normal/scope?
+    // Look up functions?
+    class ElevationTexture : public osg::Texture2D
+    {
+    public:
+        ElevationTexture(const GeoHeightField& hf, const NormalMap* normalMap);
+
+        virtual ~ElevationTexture();
+
+        //! Gets the elevation at the map coordinates. These coordinates must
+        //! be in the SRS used to create the texture.
+        ElevationSample2 getElevation(double x, double y) const;
+
+        //! Gets the elevation using normalized [0..1] coordinates.
+        ElevationSample2 getElevationUV(double u, double v) const;
+
+        //! Extent of the texture
+        const GeoExtent& getExtent() const { return _extent; }
+
+        //! Normal map associated with the elevation data, if available.
+        osg::Texture2D* getNormalMapTexture() const { return _normalTex.get(); }
+
+    private:
+        GeoExtent _extent;
+        Distance _resolution;
+        ImageUtils::PixelReader _read;
+        osg::ref_ptr<osg::Texture2D> _normalTex;
+    };
+
+    class ElevationUser
+    {
+    public:
+        virtual ElevationTexture* getElevationData() =0;
+    };
+
+    namespace Internal
+    {
+        struct EPKey
+        {
+            TileKey _tilekey;
+            unsigned _revision;
+
+            inline bool operator < (const EPKey& rhs) const {
+                if ( _tilekey < rhs._tilekey ) return true;
+                if ( rhs._tilekey < _tilekey ) return false;
+                return _revision < rhs._revision;
+            }
+            inline bool operator == (const EPKey& rhs) const {
+                return _tilekey == rhs._tilekey &&
+                    _revision == rhs._revision;
+            }
+        };
+    }
+}
+
+#ifdef OSGEARTH_CXX11
+namespace std {
+    // std::hash specialization for Key
+    template<> struct hash<osgEarth::Internal::EPKey> {
+        inline size_t operator()(const osgEarth::Internal::EPKey& value) const {
+            return value._tilekey.hash();
+        }
+    };
+}
+#endif
+
+namespace osgEarth
+{
+    /**
+     * Stores pointers to elevation data wherever it might exist
+     * so we can quickly access it for queries.
+     */
+    class OSGEARTH_EXPORT ElevationPool2 : public osg::Referenced
+    {
+    public:
+        typedef osg::observer_ptr<ElevationTexture> WeakPointer;
+        typedef osg::ref_ptr<ElevationTexture> Pointer;
+        typedef Lockable<std::unordered_map<Internal::EPKey, WeakPointer> > WeakLUT;
+
+        //! Localized cache a client can use when making multiple queries 
+        //! in a similar geographic area.
+        class OSGEARTH_EXPORT WorkingSet
+        {
+        public:
+            WorkingSet(unsigned size =64);
+            typedef LRUCache<Internal::EPKey,Pointer> LRU;
+            LRU _lru;
+        };
+
+    public:
+        ElevationPool2();
+
+        void setMap(const Map* map);
+
+        ElevationSample2 getSample(
+            const GeoPoint& p, 
+            WorkingSet* ws);
+
+        ElevationSample2 getSample(
+            const GeoPoint& p, 
+            const Distance& resolution,
+            WorkingSet* ws);
+
+        bool getTile(
+            const TileKey& key,
+            bool getNormalMap,
+            osg::ref_ptr<ElevationTexture>& out_elev,
+            WorkingSet* ws);
+
+        virtual ~ElevationPool2();
+
+    private:
+
+        osg::observer_ptr<const Map> _map;
+
+        // stores weak pointers to elevation textures wherever they may exist in the system
+        WeakLUT _globalLUT;
+
+        void* _index;
+        
+        int _mapRevision;
+
+        void refresh(const Map*);
+
+        unsigned _tileSize;
+
+        WorkingSet* _L2;
+
+        ElevationSample2 getSample(const GeoPoint& p, unsigned maxLOD, const Map* map, WorkingSet* ws);
+
+        unsigned getLOD(double x, double y) const;
+
+        osg::ref_ptr<ElevationTexture> getOrCreateRaster(
+            const Internal::EPKey& key, 
+            const Map* map, 
+            bool includeNormalMap, 
+            WorkingSet* ws);
+
+        bool findExistingRaster(
+            const Internal::EPKey& key,
+            WorkingSet* ws,
+            osg::ref_ptr<ElevationTexture>& result,
+            bool* fromWorkingSet,
+            bool* fromL2Cache,
+            bool* fromGlobalWeakLUT);
+    };
+
+}
+
+
+
+
+namespace osgEarth
+{
 
     // defined at the end of this file
     class ElevationEnvelope;

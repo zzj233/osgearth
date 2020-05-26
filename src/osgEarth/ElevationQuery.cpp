@@ -270,8 +270,17 @@ ElevationQuery::getElevationImpl(const GeoPoint& point,
     if (!_map.lock(map))
     {
         return false;
-    }    
+    } 
 
+#if 1
+    Distance resolution(desiredResolution, map->getSRS()->getUnits());
+    ElevationSample2 sample = map->getElevationPool2()->getSample(point, resolution, &_workingSet);
+    out_elevation = sample.elevation().as(Units::METERS);
+    if (out_actualResolution)
+        *out_actualResolution = sample.resolution().as(map->getSRS()->getUnits());
+    return out_elevation != NO_DATA_VALUE;
+
+#else
     // tile size (resolution of elevation tiles)
     unsigned tileSize = 257; // yes?
 
@@ -307,4 +316,5 @@ ElevationQuery::getElevationImpl(const GeoPoint& point,
     }
 
     return out_elevation != NO_DATA_VALUE;
+#endif
 }

@@ -141,10 +141,13 @@ namespace osgEarth
             return _type != rhs._type || _toBase != rhs._toBase; }
 
         bool isLinear() const { return _type == TYPE_LINEAR; }
+        bool isDistance() const { return _type == TYPE_LINEAR; }
 
         bool isAngular() const { return _type == TYPE_ANGULAR; }
+        bool isAngle() const { return _type == TYPE_ANGULAR; }
 
         bool isTemporal() const { return _type == TYPE_TEMPORAL; }
+        bool isTime() const { return _type == TYPE_TEMPORAL; }
 
         bool isSpeed() const { return _type == TYPE_SPEED; }
 
@@ -271,6 +274,15 @@ namespace osgEarth
 
         T to(const Units& convertTo) const {
             return T( as(convertTo), convertTo );
+        }
+
+        double asDistance(const Units& convertTo, double refLatDegrees) const {
+            if (_units.isAngle() && convertTo.isDistance()) {
+                double angleDeg = Units::convert(_units, Units::DEGREES, _value);
+                double meters = angleDeg * 111000.0 * cos(osg::DegreesToRadians(refLatDegrees));
+                return Units::convert(Units::METERS, convertTo, meters);
+            }
+            else return as(convertTo);
         }
 
         double       getValue() const { return _value; }

@@ -133,6 +133,8 @@ namespace osgEarth { namespace Util
 
         osg::observer_ptr<const Map> _map;
         Revision _mapRevision;
+
+        ElevationPool2::WorkingSet _workingSet;
     };
 
 } }

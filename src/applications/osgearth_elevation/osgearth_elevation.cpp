@@ -177,26 +177,62 @@ struct QueryElevationHandler : public osgGA::GUIEventHandler
             return true;
         }
 
-        else if (ea.getEventType() == ea.MOVE)
+        else if (ea.getEventType() == ea.DOUBLECLICK && ea.getButton() == ea.RIGHT_MOUSE_BUTTON)
         {
+            s_mouseLabel->setText("");
             osg::Vec3d world;
             osgUtil::LineSegmentIntersector::Intersections hits;
             if ( view->computeIntersections(ea.getX(), ea.getY(), hits) )
             {
-                s_mouseLabel->setText("");
                 world = hits.begin()->getWorldIntersectPoint();
                 GeoPoint mapPoint;
                 mapPoint.fromWorld( _terrain->getSRS(), world );
-                _mouseSample = s_mapNode->getMap()->getElevationPool()->getElevation(mapPoint);
-                _mouseSampleStart = osg::Timer::instance()->tick();
+
+                ElevationSample2 sample = _map->getElevationPool2()->getSample(mapPoint, &_ws);
+                s_mouseLabel->setText(Stringify()
+                    << sample.elevation().as(Units::METERS)<<"m (res=" 
+                    << sample.resolution().asDistance(Units::METERS, mapPoint.y()) << "m)");
             }
-            else _mouseSample = Future<ElevationSample>();
+            return true;
         }
 
-        else if (ea.getEventType() == ea.FRAME)
-        {
-            updateMouseSample();
-        }
+        //else if (ea.getEventType() == ea.MOVE)
+        //{
+        //    osg::Vec3d world;
+        //    osgUtil::LineSegmentIntersector::Intersections hits;
+        //    if ( view->computeIntersections(ea.getX(), ea.getY(), hits) )
+        //    {
+        //        world = hits.begin()->getWorldIntersectPoint();
+        //        GeoPoint mapPoint;
+        //        mapPoint.fromWorld( _terrain->getSRS(), world );
+
+        //        ElevationSample2 sample = _pool2->getSample(mapPoint, NULL);
+        //        s_mouseLabel->setText(Stringify()
+        //            << sample.elevation().as(Units::METERS)<<" m (" 
+        //            << sample.resolution().asDistance(Units::METERS, mapPoint.y()) << ")");
+        //    }
+        //}
+
+        //else if (ea.getEventType() == ea.MOVE)
+        //{
+        //    osg::Vec3d world;
+        //    osgUtil::LineSegmentIntersector::Intersections hits;
+        //    if ( view->computeIntersections(ea.getX(), ea.getY(), hits) )
+        //    {
+        //        s_mouseLabel->setText("");
+        //        world = hits.begin()->getWorldIntersectPoint();
+        //        GeoPoint mapPoint;
+        //        mapPoint.fromWorld( _terrain->getSRS(), world );
+        //        _mouseSample = s_mapNode->getMap()->getElevationPool()->getElevation(mapPoint);
+        //        _mouseSampleStart = osg::Timer::instance()->tick();
+        //    }
+        //    else _mouseSample = Future<ElevationSample>();
+        //}
+
+        //else if (ea.getEventType() == ea.FRAME)
+        //{
+        //    updateMouseSample();
+        //}
 
         return false;
     }
@@ -208,6 +244,7 @@ struct QueryElevationHandler : public osgGA::GUIEventHandler
     osg::ref_ptr<ElevationEnvelope> _envelope;
     Future<ElevationSample> _mouseSample;
     osg::Timer_t _mouseSampleStart;
+    ElevationPool2::WorkingSet _ws;
 };
 
 
