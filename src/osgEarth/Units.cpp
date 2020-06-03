@@ -74,6 +74,9 @@ namespace
                 Units units;
                 if ( Units::parse(unitsStr, units) )
                     out_units = units;
+                else if (unitsStr.back() != 's' && Units::parse(unitsStr+'s', units))
+                    out_units = units;
+                    
             }
             else
             {

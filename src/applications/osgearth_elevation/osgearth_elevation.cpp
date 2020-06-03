@@ -63,6 +63,7 @@ struct QueryElevationHandler : public osgGA::GUIEventHandler
         _map = s_mapNode->getMap();
         _path.push_back( s_mapNode->getTerrainEngine() );
         _envelope = _map->getElevationPool()->createEnvelope(_map->getSRS(), 20u);
+        _async = new AsyncElevationSampler(_map);
     }
 
     void update( float x, float y, osgViewer::View* view )
@@ -159,11 +160,16 @@ struct QueryElevationHandler : public osgGA::GUIEventHandler
         {
             osg::Timer_t end = osg::Timer::instance()->tick();
             float seconds = osg::Timer::instance()->delta_s(_mouseSampleStart, end);
-            osg::ref_ptr<ElevationSample> result = _mouseSample.release();
-            if (result->elevation == NO_DATA_VALUE)
+            osg::ref_ptr<RefElevationSample2> result = _mouseSample.release();
+            if (!result.valid() || result->elevation().as(Units::METERS) == NO_DATA_VALUE)
                 s_mouseLabel->setText("NO DATA");
             else
-                s_mouseLabel->setText(Stringify() << result->elevation << "m (" << std::setprecision(2) << seconds << " s)");
+            {
+                s_mouseLabel->setText(Stringify() 
+                    << result->elevation().as(Units::METERS) << "m ("
+                    << std::setprecision(2) << result->resolution().asString() << ")"
+                    << " (" << seconds << "s)");
+            }
         }
     }
 
@@ -213,26 +219,26 @@ struct QueryElevationHandler : public osgGA::GUIEventHandler
         //    }
         //}
 
-        //else if (ea.getEventType() == ea.MOVE)
-        //{
-        //    osg::Vec3d world;
-        //    osgUtil::LineSegmentIntersector::Intersections hits;
-        //    if ( view->computeIntersections(ea.getX(), ea.getY(), hits) )
-        //    {
-        //        s_mouseLabel->setText("");
-        //        world = hits.begin()->getWorldIntersectPoint();
-        //        GeoPoint mapPoint;
-        //        mapPoint.fromWorld( _terrain->getSRS(), world );
-        //        _mouseSample = s_mapNode->getMap()->getElevationPool()->getElevation(mapPoint);
-        //        _mouseSampleStart = osg::Timer::instance()->tick();
-        //    }
-        //    else _mouseSample = Future<ElevationSample>();
-        //}
+        else if (ea.getEventType() == ea.MOVE)
+        {
+            osg::Vec3d world;
+            osgUtil::LineSegmentIntersector::Intersections hits;
+            if ( view->computeIntersections(ea.getX(), ea.getY(), hits) )
+            {
+                s_mouseLabel->setText("");
+                world = hits.begin()->getWorldIntersectPoint();
+                GeoPoint mapPoint;
+                mapPoint.fromWorld( _terrain->getSRS(), world );
+                _mouseSample = _async->getSample(mapPoint, 0.0);
+                _mouseSampleStart = osg::Timer::instance()->tick();
+            }
+            else _mouseSample = Future<RefElevationSample2>();
+        }
 
-        //else if (ea.getEventType() == ea.FRAME)
-        //{
-        //    updateMouseSample();
-        //}
+        else if (ea.getEventType() == ea.FRAME)
+        {
+            updateMouseSample();
+        }
 
         return false;
     }
@@ -242,9 +248,10 @@ struct QueryElevationHandler : public osgGA::GUIEventHandler
     bool             _mouseDown;
     osg::NodePath    _path;
     osg::ref_ptr<ElevationEnvelope> _envelope;
-    Future<ElevationSample> _mouseSample;
+    Future<RefElevationSample2> _mouseSample;
     osg::Timer_t _mouseSampleStart;
     ElevationPool2::WorkingSet _ws;
+    osg::ref_ptr<AsyncElevationSampler> _async;
 };
 
 

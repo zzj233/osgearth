@@ -23,6 +23,9 @@
 #include <osgEarth/HeightFieldUtils>
 #include <osgEarth/Registry>
 
+#include <thread>
+#include <chrono>
+
 using namespace osgEarth;
 
 #define LC "[ElevationPool] "
@@ -789,175 +792,114 @@ ElevationEnvelope::collectDataExtents()
 
 //...................................................................
 
-namespace
-{
-    // octohodreal normal packing
-    osg::Vec2 packNormal(const osg::Vec3& v)
-    {
-        osg::Vec2 p;
-        float d = 1.0/(fabs(v.x())+fabs(v.y())+fabs(v.z()));
-        p.x() = v.x() * d;
-        p.y() = v.y() * d;
-
-        if (v.z() < 0.0)
-        {
-            p.x() = (1.0 - fabs(p.y())) * (p.x() >= 0.0? 1.0 : -1.0);
-            p.y() = (1.0 - fabs(p.x())) * (p.y() >= 0.0? 1.0 : -1.0);
-        }
-
-        p.x() = 0.5f*(p.x()+1.0f);
-        p.y() = 0.5f*(p.y()+1.0f);
-
-        return p;
-    }
-}
-
-ElevationTexture::ElevationTexture(const GeoHeightField& in_hf, const NormalMap* normalMap) :
-    _extent(in_hf.getExtent())
-{
-    if (in_hf.valid())
-    {
-        const osg::HeightField* hf = in_hf.getHeightField();
-        osg::Vec4 value;
-
-        osg::Image* heights = new osg::Image();
-        heights->allocateImage(hf->getNumColumns(), hf->getNumRows(), 1, GL_RED, GL_FLOAT);
-        heights->setInternalTextureFormat(GL_R32F);
-
-        ImageUtils::PixelWriter write(heights);
-        // TODO: speed this up since we know the format
-        for(unsigned row=0; row<hf->getNumRows(); ++row)
-        {
-            for(unsigned col=0; col<hf->getNumColumns(); ++col)
-            {
-                value.r() = hf->getHeight(col, row);
-                write(value, col, row);
-            }
-        }
-        setImage(heights);
-
-        setDataVariance(osg::Object::STATIC);
-        setInternalFormat(GL_R32F);
-        setFilter(osg::Texture::MAG_FILTER, osg::Texture::LINEAR);
-        setFilter(osg::Texture::MIN_FILTER, osg::Texture::NEAREST);
-        setWrap(osg::Texture::WRAP_S, osg::Texture::CLAMP_TO_EDGE);
-        setWrap(osg::Texture::WRAP_T, osg::Texture::CLAMP_TO_EDGE);
-        setResizeNonPowerOfTwoHint(false);
-        setMaxAnisotropy(1.0f);
-        setUnRefImageDataAfterApply(Registry::instance()->unRefImageDataAfterApply().get());
-
-        if (normalMap)
-        {
-            osg::Image* normals = new osg::Image();
-            normals->allocateImage(normalMap->s(), normalMap->t(), 1, GL_RG, GL_UNSIGNED_BYTE);
-            normals->setInternalTextureFormat(GL_RG8);
-            ImageUtils::PixelWriter writeNormal(normals);
-
-            osg::Vec2 temp;
-            for(int t=0; t<normalMap->t(); ++t)
-            {
-                for(int s=0; s<normalMap->s(); ++s)
-                {
-                    temp = packNormal(normalMap->getNormal(s, t));
-                    value.r() = temp.x(), value.g() = temp.y();
-                    writeNormal(value, s, t);
-                }
-            }
-            _normalTex = new osg::Texture2D(normals);
-
-            _normalTex->setInternalFormat(GL_RG8);
-            _normalTex->setFilter(osg::Texture::MAG_FILTER, osg::Texture::LINEAR);
-            _normalTex->setFilter(osg::Texture::MIN_FILTER, osg::Texture::LINEAR);
-            _normalTex->setWrap(osg::Texture::WRAP_S, osg::Texture::CLAMP_TO_EDGE);
-            _normalTex->setWrap(osg::Texture::WRAP_T, osg::Texture::CLAMP_TO_EDGE);
-            _normalTex->setResizeNonPowerOfTwoHint(false);
-            _normalTex->setMaxAnisotropy(1.0f);
-            _normalTex->setUnRefImageDataAfterApply(Registry::instance()->unRefImageDataAfterApply().get());
-        }
-
-        _read.setTexture(this);
-        _read.setSampleAsTexture(false);
-
-        _resolution = Distance(
-            getExtent().height() / ((double)(getImage(0)->s()-1)),
-            getExtent().getSRS()->getUnits());
-    }
-}
-
-ElevationTexture::~ElevationTexture()
-{
-    //nop
-}
-
-ElevationSample2
-ElevationTexture::getElevation(double x, double y) const
-{
-    double u = (x - getExtent().xMin()) / getExtent().width();
-    double v = (y - getExtent().yMin()) / getExtent().height();
-
-    return getElevationUV(u, v);
-}
-
-ElevationSample2
-ElevationTexture::getElevationUV(double u, double v) const
-{
-    osg::Vec4 value;
-    _read(value, u, v);
-    return ElevationSample2(value.r(), _resolution);
-}
-
-//...................................................................
-
 // TODO
-// - convert dataextents to the map profile before building the spatial index.
+// - Deal with datasources that don't have dataextents
 // - create a TileKey=>ActualTileKey mapping for elevation layers that
 //   don't properly report their max levels.
 // - install timers to bnechmark queries
-// - consider using a default WorkingSet if the user doesn't supply one.
+// - (DONE) work on thread-safety of calling refresh() while there are operations in progress
+// - (DONE) convert dataextents to the map profile before building the spatial index.
+// - (DONE - L2 cache) consider using a default WorkingSet if the user doesn't supply one.
+
+void
+ElevationPool2::MapCallbackAdapter::onMapModelChanged(const MapModelChange& c)
+{
+    _pool->_mapDataDirty = true;
+}
 
 ElevationPool2::ElevationPool2() :
     _index(NULL),
-    _mapRevision(0u),
-    _tileSize(257)
+    _tileSize(257),
+    _mapDataDirty(true),
+    _workers(0)
 {
     // small L2 cache
     _L2 = new WorkingSet(16u);
+
+    // adapter for detecting elevation layer changes
+    _mapCallback = new MapCallbackAdapter();
 }
 
 ElevationPool2::~ElevationPool2()
 {
     if (_L2)
         delete _L2;
+
+    setMap(NULL);
 }
 
 void
 ElevationPool2::setMap(const Map* map)
 {
+    if (map != _map.get())
+    {
+        osg::ref_ptr<const Map> oldMap;
+        if (_map.lock(oldMap))
+        {
+            oldMap->removeMapCallback(_mapCallback.get());
+        }
+    }
+
     _map = map;
-    refresh(map);
+    
+    if (map)
+    {
+        _mapCallback->_pool = this;
+        map->addMapCallback(_mapCallback.get());
+        refresh(map);
+    }
+}
+
+int
+ElevationPool2::getElevationRevision(const Map* map) const
+{
+    // yes, must do this every time because individual
+    // layers can "bump" their revisions (dynamic layers)
+    int revision = map->getDataModelRevision();
+    for(auto i : _elevationLayers)
+        if (i->getEnabled())
+            revision += i->getRevision();
+    return revision;
 }
 
 typedef RTree<unsigned, double, 2> MaxLevelIndex;
 
 void
+ElevationPool2::sync(const Map* map)
+{
+    if (_mapDataDirty)
+    {
+        while(_workers > 0)
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+        _refreshMutex.lock();
+        if (_mapDataDirty) // double check
+        {
+            refresh(map);
+            _mapDataDirty = false;
+        }
+        _refreshMutex.unlock();
+    }
+}
+
+void
 ElevationPool2::refresh(const Map* map)
 {
-    _globalLUT.lock();
+    _elevationLayers.clear();
 
     if (_index)
         delete _index;
 
+    map->getLayers(_elevationLayers);
+
     MaxLevelIndex* index = new MaxLevelIndex();
     _index = index;
 
-    ElevationLayerVector layers;
-    map->getLayers(layers);
-
     double minv[2], maxv[2];
         
-    for(auto i = layers.begin(); i != layers.end(); ++i)
+    for(auto i : _elevationLayers)
     {
-        const ElevationLayer* layer = i->get();
+        const ElevationLayer* layer = i.get();
         const DataExtentList& dataExtents = layer->getDataExtents();
 
         for(auto de = dataExtents.begin(); de != dataExtents.end(); ++de)
@@ -974,10 +916,10 @@ ElevationPool2::refresh(const Map* map)
         }
     }
 
+    _L2->_lru.clear();
+
+    _globalLUT.lock();
     _globalLUT.clear();
-
-    _mapRevision = map->getDataModelRevision();
-
     _globalLUT.unlock();
 }
 
@@ -1006,7 +948,7 @@ ElevationPool2::WorkingSet::WorkingSet(unsigned size) :
 
 bool
 ElevationPool2::findExistingRaster(
-    const Internal::EPKey& key,
+    const Internal::RevElevationKey& key,
     WorkingSet* ws,
     osg::ref_ptr<ElevationTexture>& output,
     bool* fromWS,
@@ -1024,7 +966,7 @@ ElevationPool2::findExistingRaster(
         WorkingSet::LRU::Record record;
         if (ws->_lru.get(key, record))
         {
-            OE_INFO << LC << key._tilekey.str() << " - Cache hit (Working set)" << std::endl;
+            OE_DEBUG << LC << key._tilekey.str() << " - Cache hit (Working set)" << std::endl;
             output = record.value();
             *fromWS = true;
             return true;
@@ -1036,7 +978,7 @@ ElevationPool2::findExistingRaster(
         WorkingSet::LRU::Record record;
         if (_L2->_lru.get(key, record))
         {
-            OE_INFO << LC << key._tilekey.str() << " - Cache hit (L2 cache)" << std::endl;
+            OE_DEBUG << LC << key._tilekey.str() << " - Cache hit (L2 cache)" << std::endl;
             output = record.value();
             *fromL2 = true;
             return true;
@@ -1066,14 +1008,19 @@ ElevationPool2::findExistingRaster(
     // found it, so stick it in the L2 cache
     if (output.valid())
     {
-        OE_INFO << LC << key._tilekey.str() << " - Cache hit (global LUT)" << std::endl;
+        OE_DEBUG << LC << key._tilekey.str() << " - Cache hit (global LUT)" << std::endl;
     }
 
     return output.valid();
 }
 
 osg::ref_ptr<ElevationTexture>
-ElevationPool2::getOrCreateRaster(const Internal::EPKey& key, const Map* map, bool getNormalMap, WorkingSet* ws)
+ElevationPool2::getOrCreateRaster(
+    const Internal::RevElevationKey& key, 
+    const Map* map, 
+    bool getNormalMap, 
+    bool acceptLowerRes,
+    WorkingSet* ws)
 {
     // first check for pre-existing data for this key:
     osg::ref_ptr<ElevationTexture> result;
@@ -1102,25 +1049,35 @@ ElevationPool2::getOrCreateRaster(const Internal::EPKey& key, const Map* map, bo
             normalMap = new NormalMap(_tileSize, _tileSize);
         }
 
-        ElevationLayerVector layers;
-        _map->getLayers(layers);
+        TileKey keyToUse;
+        bool populated = false;
 
-        bool populated = layers.populateHeightFieldAndNormalMap(
-            hf.get(),
-            normalMap.get(),
-            key._tilekey,
-            map->getProfileNoVDatum(), // convertToHAE,
-            map->getElevationInterpolation(),
-            NULL ); // TODO: progress callback
+        for(keyToUse = key._tilekey; 
+            keyToUse.valid(); 
+            keyToUse = keyToUse.createParentKey())
+        {
+            populated = _elevationLayers.populateHeightFieldAndNormalMap(
+                hf.get(),
+                normalMap.get(),
+                keyToUse,
+                map->getProfileNoVDatum(), // convertToHAE,
+                map->getElevationInterpolation(),
+                NULL ); // TODO: progress callback
 
-        if (!populated)
+            if (populated==true || acceptLowerRes==false)
+                break;
+        }
+
+        if (populated)
+        {
+            result = new ElevationTexture(
+                GeoHeightField(hf.get(), keyToUse.getExtent()),
+                normalMap.get());
+        }
+        else
         {
             return NULL;
         }
-
-        result = new ElevationTexture(
-            GeoHeightField(hf.get(), key._tilekey.getExtent()),
-            normalMap.get());
     }
 
     // update WorkingSet:
@@ -1147,17 +1104,28 @@ ElevationPool2::getOrCreateRaster(const Internal::EPKey& key, const Map* map, bo
 }
 
 ElevationSample2
-ElevationPool2::getSample(const GeoPoint& p, unsigned maxLOD, const Map* map, WorkingSet* ws)
+ElevationPool2::getSample(
+    const GeoPoint& p, 
+    unsigned maxLOD, 
+    const Map* map, 
+    WorkingSet* ws)
 {
-    if (_mapRevision < map->getDataModelRevision())
-        refresh(map);
+    // ensure the Pool is in sync with the map
+    sync(map);
 
-    Internal::EPKey key;
+    ScopedAtomicCounter counter(_workers);
+
+    Internal::RevElevationKey key;
     unsigned lod = osg::minimum( getLOD(p.x(), p.y()), maxLOD );
     key._tilekey = map->getProfile()->createTileKey(p.x(), p.y(), lod);
-    key._revision = map->getDataModelRevision();
+    key._revision = getElevationRevision(map);
 
-    osg::ref_ptr<ElevationTexture> raster = getOrCreateRaster(key, map, false, ws);
+    osg::ref_ptr<ElevationTexture> raster = getOrCreateRaster(
+        key,   // key to query
+        map,   // map to query
+        false, // no normal maps
+        true,  // fall back on lower resolution data if necessary
+        ws);   // user's workingset
 
     if (raster.valid())
     {
@@ -1195,15 +1163,19 @@ ElevationPool2::getSample(const GeoPoint& p, const Distance& resolution, Working
     if (!p.isValid())
         return ElevationSample2(NO_DATA_VALUE, 0.0f);
 
-    osg::ref_ptr<const Map> map = _map.get();
-    if (!map.valid() || !map->getProfile())
+    osg::ref_ptr<const Map> map;
+    if (_map.lock(map) == false || map->getProfile() == NULL)
         return ElevationSample2(NO_DATA_VALUE, 0.0f);
 
-    const int ELEV_TILE_SIZE = 257;
+    // mostly right. :)
+    double resolutionInMapUnits = SpatialReference::transformUnits(
+        resolution,
+        map->getSRS(),
+        p.y());
 
     unsigned maxLOD = map->getProfile()->getLevelOfDetailForHorizResolution(
-        resolution.as(map->getSRS()->getUnits()),
-        ELEV_TILE_SIZE);
+        resolutionInMapUnits,
+        ELEVATION_TILE_SIZE);
 
     if (!p.getSRS()->isHorizEquivalentTo(map->getProfile()->getSRS()))
     {
@@ -1218,20 +1190,80 @@ ElevationPool2::getSample(const GeoPoint& p, const Distance& resolution, Working
 }
 
 bool
-ElevationPool2::getTile(const TileKey& tilekey, bool getNormalMap, osg::ref_ptr<ElevationTexture>& out_tex, WorkingSet* ws)
+ElevationPool2::getTile(
+    const TileKey& tilekey, 
+    bool getNormalMap, 
+    bool acceptLowerRes,
+    osg::ref_ptr<ElevationTexture>& out_tex,
+    WorkingSet* ws)
 {
-    osg::ref_ptr<const Map> map = _map.get();
-    if (!map.valid())
+    osg::ref_ptr<const Map> map;
+    if (!_map.lock(map))
         return false;
 
-    if (_mapRevision < map->getDataModelRevision())
-        refresh(map.get());
+    // ensure we are in sync with the map
+    sync(map.get());
 
-    Internal::EPKey key;
+    ScopedAtomicCounter counter(_workers);
+
+    Internal::RevElevationKey key;
     key._tilekey = tilekey;
-    key._revision = _map->getDataModelRevision();
+    key._revision = getElevationRevision(map.get());
 
-    out_tex = getOrCreateRaster(key, _map.get(), getNormalMap, ws);
+    out_tex = getOrCreateRaster(key, _map.get(), getNormalMap, acceptLowerRes, ws);
 
     return true;
+}
+
+//...................................................................
+
+namespace osgEarth { namespace Internal
+{
+    struct SampleElevationOp : public osg::Operation
+    {
+        osg::observer_ptr<const Map> _map;
+        GeoPoint _p;
+        Distance _res;
+        ElevationPool2::WorkingSet* _ws;
+        Promise<RefElevationSample2> _promise;
+
+        SampleElevationOp(osg::observer_ptr<const Map> map, const GeoPoint& p, const Distance& res, ElevationPool2::WorkingSet* ws) :
+            _map(map), _p(p), _res(res), _ws(ws) { }
+
+        void operator()(osg::Object*)
+        {
+            if (!_promise.isAbandoned())
+            {
+                osg::ref_ptr<const Map> map;
+                if (_map.lock(map))
+                {
+                    ElevationSample2 sample = map->getElevationPool2()->getSample(_p, _res, _ws);
+                    _promise.resolve(new RefElevationSample2(sample.elevation(), sample.resolution()));
+                    return;
+                }
+            }
+
+            _promise.resolve(NULL);
+        }
+    };
+}}
+
+AsyncElevationSampler::AsyncElevationSampler(
+    const Map* map,
+    unsigned numThreads) :
+
+    _map(map)
+{
+    _threadPool = new ThreadPool(numThreads);
+}
+
+Future<RefElevationSample2>
+AsyncElevationSampler::getSample(
+    const GeoPoint& p,
+    const Distance& resolution)
+{
+    Internal::SampleElevationOp* op = new Internal::SampleElevationOp(_map, p, resolution, &_ws);
+    Future<RefElevationSample2> result = op->_promise.getFuture();
+    _threadPool->getQueue()->add(op);
+    return result;
 }
