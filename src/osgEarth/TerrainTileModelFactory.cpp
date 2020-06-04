@@ -430,7 +430,7 @@ TerrainTileModelFactory::addElevation(
     bool getNormalMap = (_options.normalMaps() == true);
     const bool acceptLowerRes = false;
 
-    if (map->getElevationPool2()->getTile(key, getNormalMap, acceptLowerRes, elevTex, NULL))
+    if (map->getElevationPool()->getTile(key, getNormalMap, acceptLowerRes, elevTex, NULL))
     {
         osg::ref_ptr<TerrainTileElevationModel> layerModel = new TerrainTileElevationModel();
         layerModel->setRevision(combinedRevision);

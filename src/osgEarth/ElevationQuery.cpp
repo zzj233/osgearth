@@ -69,9 +69,6 @@ ElevationQuery::reset()
         // revisions are now in sync.
         _mapRevision = map->getDataModelRevision();
     }
-
-    // clear any active envelope
-    _envelope = 0L;
 }
 void
 ElevationQuery::sync()
@@ -272,49 +269,14 @@ ElevationQuery::getElevationImpl(const GeoPoint& point,
         return false;
     } 
 
-#if 1
+    // Set the query resolution:
     Distance resolution(desiredResolution, map->getSRS()->getUnits());
-    ElevationSample2 sample = map->getElevationPool2()->getSample(point, resolution, &_workingSet);
+
+    // Sample the pool
+    ElevationSample sample = map->getElevationPool()->getSample(point, resolution, &_workingSet);
     out_elevation = sample.elevation().as(Units::METERS);
     if (out_actualResolution)
         *out_actualResolution = sample.resolution().as(map->getSRS()->getUnits());
-    return out_elevation != NO_DATA_VALUE;
-
-#else
-    // tile size (resolution of elevation tiles)
-    unsigned tileSize = 257; // yes?
-
-    // default LOD:
-    unsigned lod = 23u;
-
-    // attempt to map the requested resolution to an LOD:
-    if (desiredResolution > 0.0)
-    {
-        int level = map->getProfile()->getLevelOfDetailForHorizResolution(desiredResolution, tileSize);
-        if ( level > 0 )
-            lod = level;
-    }
-
-    // do we need a new ElevationEnvelope?
-    if (!_envelope.valid() ||
-        !point.getSRS()->isHorizEquivalentTo(_envelope->getSRS()) ||
-        lod != _envelope->getLOD())
-    {        
-        _envelope = map->getElevationPool()->createEnvelope(point.getSRS(), lod);
-    }
-
-    // sample the elevation, and if requested, the resolution as well:
-    if (out_actualResolution)
-    {
-        std::pair<float, float> result = _envelope->getElevationAndResolution(point.x(), point.y());
-        out_elevation = result.first;
-        *out_actualResolution = result.second;
-    }
-    else
-    {
-        out_elevation = _envelope->getElevation(point.x(), point.y());
-    }
 
     return out_elevation != NO_DATA_VALUE;
-#endif
 }

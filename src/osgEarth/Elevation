@@ -32,13 +32,14 @@ namespace osgEarth
     /**
      * Result of an elevation sampling query
      */
-    class OSGEARTH_EXPORT ElevationSample2
+    class OSGEARTH_EXPORT ElevationSample
     {
     public:
-        ElevationSample2(const Distance& e, const Distance& r) : _e(e), _r(r) { }
+        ElevationSample() : _e(NO_DATA_VALUE, Units::METERS), _r(0.0, Units::METERS) { }
+        ElevationSample(const Distance& e, const Distance& r) : _e(e), _r(r) { }
         const Distance& elevation() const { return _e; }
         const Distance& resolution() const { return _r; }
-        bool valid() const { return _e.getValue() != NO_DATA_VALUE && _r.getValue() > 0.0f; }
+        bool hasData() const { return _e.getValue() != NO_DATA_VALUE && _r.getValue() > 0.0f; }
     private:
         Distance _e, _r;
     };
@@ -46,11 +47,11 @@ namespace osgEarth
     /**
      * Reference-counted wrapper for ElevationSample
      */
-    class OSGEARTH_EXPORT RefElevationSample2 : public ElevationSample2, public osg::Referenced
+    class OSGEARTH_EXPORT RefElevationSample : public ElevationSample, public osg::Referenced
     {
     public:
-        RefElevationSample2(const Distance& e, const Distance& r) :
-            ElevationSample2(e, r) { }
+        RefElevationSample(const Distance& e, const Distance& r) :
+            ElevationSample(e, r) { }
     };
 
     // CONTAINER for elevation data on the system "somewhere".
@@ -69,10 +70,10 @@ namespace osgEarth
 
         //! Gets the elevation at the map coordinates. These coordinates must
         //! be in the SRS used to create the texture.
-        ElevationSample2 getElevation(double x, double y) const;
+        ElevationSample getElevation(double x, double y) const;
 
         //! Gets the elevation using normalized [0..1] coordinates.
-        ElevationSample2 getElevationUV(double u, double v) const;
+        ElevationSample getElevationUV(double u, double v) const;
 
         //! Extent of the texture
         const GeoExtent& getExtent() const { return _extent; }

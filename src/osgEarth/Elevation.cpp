@@ -93,6 +93,9 @@ ElevationTexture::ElevationTexture(const GeoHeightField& in_hf, const NormalMap*
                 {
                     temp = packNormal(normalMap->getNormal(s, t));
                     value.r() = temp.x(), value.g() = temp.y();
+                    // TODO: won't actually be written until we make the format GL_RGB
+                    // but we need to rewrite the curvature generator first
+                    value.b() = 0.5f*(1.0f+normalMap->getCurvature(s, t));
                     writeNormal(value, s, t);
                 }
             }
@@ -122,7 +125,7 @@ ElevationTexture::~ElevationTexture()
     //nop
 }
 
-ElevationSample2
+ElevationSample
 ElevationTexture::getElevation(double x, double y) const
 {
     double u = (x - getExtent().xMin()) / getExtent().width();
@@ -131,10 +134,10 @@ ElevationTexture::getElevation(double x, double y) const
     return getElevationUV(u, v);
 }
 
-ElevationSample2
+ElevationSample
 ElevationTexture::getElevationUV(double u, double v) const
 {
     osg::Vec4 value;
     _read(value, u, v);
-    return ElevationSample2(value.r(), _resolution);
+    return ElevationSample(Distance(value.r(),Units::METERS), _resolution);
 }

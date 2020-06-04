@@ -65,13 +65,14 @@ float oe_terrain_getElevation()
 vec4 oe_terrain_getNormalAndCurvature(in vec2 uv_scaledBiased)
 {
     vec4 n = texture(oe_tile_normalTex, uv_scaledBiased);
-    n.xy = n.xy*2.0-1.0;
+    n.xyz = n.xyz*2.0-1.0;
+    float curv = n.z;
     n.z = 1.0 - abs(n.x) - abs(n.y);
     // unnecessary since Z is never < 0:
     //float t = clamp(-n.z, 0, 1);
     //n.x += (n.x > 0)? -t : t;
     //n.y += (n.y > 0)? -t : t;
-    return vec4(normalize(n.xyz), n.w);
+    return vec4(normalize(n.xyz), curv);
 }
 
 vec4 oe_terrain_getNormalAndCurvature()

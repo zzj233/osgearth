@@ -49,7 +49,8 @@ static LabelControl*  s_haeLabel    = 0L;
 static LabelControl*  s_egm96Label  = 0L;
 static LabelControl*  s_mapLabel    = 0L;
 static LabelControl*  s_resLabel    = 0L;
-static LabelControl*  s_mouseLabel  = 0L;
+static LabelControl*  s_asyncLabel  = 0L;
+static LabelControl*  s_asyncResLabel = 0L;
 static ModelNode*     s_marker      = 0L;
 
 
@@ -62,13 +63,14 @@ struct QueryElevationHandler : public osgGA::GUIEventHandler
     {
         _map = s_mapNode->getMap();
         _path.push_back( s_mapNode->getTerrainEngine() );
-        _envelope = _map->getElevationPool()->createEnvelope(_map->getSRS(), 20u);
+
+        // utility for asynchronous sampling requests
         _async = new AsyncElevationSampler(_map);
     }
 
     void update( float x, float y, osgViewer::View* view )
     {
-        bool yes = false;
+        bool validSample = false;
 
         // look under the mouse:
         osg::Vec3d world;
@@ -81,40 +83,33 @@ struct QueryElevationHandler : public osgGA::GUIEventHandler
             GeoPoint mapPoint;
             mapPoint.fromWorld( _terrain->getSRS(), world );
 
-            // do an elevation query:
-            double query_resolution  = 0.0;  // max.
-            double actual_resolution = 0.0;
-            float elevation          = 0.0f;
+            // Query the elevation at the map location:
+            ElevationSample sample = s_mapNode->getMap()->getElevationPool()->getSample(
+                mapPoint,
+                &_workingSet);
 
-            std::pair<float, float> result = _envelope->getElevationAndResolution(
-                mapPoint.x(), mapPoint.y());
+            // want to express resolution in meters:
+            Distance cartesianResolution = mapPoint.transformResolution(
+                sample.resolution(),
+                Units::METERS);
 
-            elevation = result.first;
-            actual_resolution = result.second;
-
-            if ( elevation != NO_DATA_VALUE )
+            if ( sample.hasData() )
             {
                 // convert to geodetic to get the HAE:
-                mapPoint.z() = elevation;
+                mapPoint.z() = sample.elevation().as(Units::METERS);
+
                 GeoPoint mapPointGeodetic( s_mapNode->getMapSRS()->getGeodeticSRS(), mapPoint );
 
                 static LatLongFormatter s_f;
-
                 s_posLabel->setText( Stringify()
                     << std::fixed << std::setprecision(2)
-                    << s_f.format(mapPointGeodetic.y(), true)
+                    << s_f.format(Angle(mapPointGeodetic.y(), mapPointGeodetic.getXYUnits()), true)
                     << ", "
-                    << s_f.format(mapPointGeodetic.x(), false) );
+                    << s_f.format(Angle(mapPointGeodetic.x(), mapPointGeodetic.getXYUnits()), false) );
 
-                if (s_mapNode->getMapSRS()->isGeographic())
-                {
-                    double metersPerDegree = s_mapNode->getMapSRS()->getEllipsoid()->getRadiusEquator() / 360.0;
-                    actual_resolution *= metersPerDegree * cos(osg::DegreesToRadians(mapPoint.y()));
-                }
-
-                s_mslLabel->setText( Stringify() << elevation << " m" );
+                s_mslLabel->setText( Stringify() << sample.elevation().as(Units::METERS) << " m" );
                 s_haeLabel->setText( Stringify() << mapPointGeodetic.z() << " m" );
-                s_resLabel->setText( Stringify() << actual_resolution << " m" );
+                s_resLabel->setText( Stringify() << cartesianResolution.as(Units::METERS) << " m" );
 
                 double egm96z = mapPoint.z();
 
@@ -127,7 +122,7 @@ struct QueryElevationHandler : public osgGA::GUIEventHandler
 
                 s_egm96Label->setText(Stringify() << egm96z << " m");
 
-                yes = true;
+                validSample = true;
             }
 
             // now get a normal ISECT HAE point.
@@ -144,7 +139,7 @@ struct QueryElevationHandler : public osgGA::GUIEventHandler
             s_marker->setLocalRotation(q);
         }
 
-        if (!yes)
+        if (!validSample)
         {
             s_posLabel->setText( "-" );
             s_mslLabel->setText( "-" );
@@ -154,20 +149,29 @@ struct QueryElevationHandler : public osgGA::GUIEventHandler
         }
     }
 
-    void updateMouseSample()
+    void checkForAsyncResult()
     {
-        if (_mouseSample.isAvailable())
+        if (_asyncSample.isAvailable())
         {
             osg::Timer_t end = osg::Timer::instance()->tick();
-            float seconds = osg::Timer::instance()->delta_s(_mouseSampleStart, end);
-            osg::ref_ptr<RefElevationSample2> result = _mouseSample.release();
-            if (!result.valid() || result->elevation().as(Units::METERS) == NO_DATA_VALUE)
-                s_mouseLabel->setText("NO DATA");
+            float seconds = osg::Timer::instance()->delta_s(_asyncSampleStart, end);
+
+            osg::ref_ptr<RefElevationSample> sample = _asyncSample.release();
+
+            if (!sample.valid() || !sample->hasData())
+            {
+                s_asyncLabel->setText("NO DATA");
+            }
             else
             {
-                s_mouseLabel->setText(Stringify() 
-                    << result->elevation().as(Units::METERS) << "m ("
-                    << std::setprecision(2) << result->resolution().asString() << ")"
+                // want to express resolution in meters:
+                Distance cartesianResolution = _asyncSamplePoint.transformResolution(
+                    sample->resolution(),
+                    Units::METERS);
+
+                s_asyncLabel->setText(Stringify() 
+                    << sample->elevation().as(Units::METERS) << "m ("
+                    << std::setprecision(2) << cartesianResolution.as(Units::METERS) << ")"
                     << " (" << seconds << "s)");
             }
         }
@@ -185,7 +189,11 @@ struct QueryElevationHandler : public osgGA::GUIEventHandler
 
         else if (ea.getEventType() == ea.DOUBLECLICK && ea.getButton() == ea.RIGHT_MOUSE_BUTTON)
         {
-            s_mouseLabel->setText("");
+            // On double-click, sample the terrain under the mouse
+            // in a variety of ways
+            s_asyncLabel->setText("");
+            s_asyncResLabel->setText("");
+
             osg::Vec3d world;
             osgUtil::LineSegmentIntersector::Intersections hits;
             if ( view->computeIntersections(ea.getX(), ea.getY(), hits) )
@@ -194,50 +202,47 @@ struct QueryElevationHandler : public osgGA::GUIEventHandler
                 GeoPoint mapPoint;
                 mapPoint.fromWorld( _terrain->getSRS(), world );
 
-                ElevationSample2 sample = _map->getElevationPool2()->getSample(mapPoint, &_ws);
-                s_mouseLabel->setText(Stringify()
-                    << sample.elevation().as(Units::METERS)<<"m (res=" 
-                    << sample.resolution().asDistance(Units::METERS, mapPoint.y()) << "m)");
+                ElevationSample sample = _map->getElevationPool()->getSample(
+                    mapPoint, 
+                    &_workingSet);
+
+                s_asyncLabel->setText(Stringify()<< sample.elevation().as(Units::METERS)<<" m");
+                s_asyncResLabel->setText(Stringify()<< mapPoint.transformResolution(sample.resolution(), Units::METERS).getValue() << " m");
             }
             return true;
         }
 
-        //else if (ea.getEventType() == ea.MOVE)
-        //{
-        //    osg::Vec3d world;
-        //    osgUtil::LineSegmentIntersector::Intersections hits;
-        //    if ( view->computeIntersections(ea.getX(), ea.getY(), hits) )
-        //    {
-        //        world = hits.begin()->getWorldIntersectPoint();
-        //        GeoPoint mapPoint;
-        //        mapPoint.fromWorld( _terrain->getSRS(), world );
-
-        //        ElevationSample2 sample = _pool2->getSample(mapPoint, NULL);
-        //        s_mouseLabel->setText(Stringify()
-        //            << sample.elevation().as(Units::METERS)<<" m (" 
-        //            << sample.resolution().asDistance(Units::METERS, mapPoint.y()) << ")");
-        //    }
-        //}
-
         else if (ea.getEventType() == ea.MOVE)
         {
+            // on mouse move, perform an asynchronous elevation query
+            // to avoid slowing down the rendering:
             osg::Vec3d world;
             osgUtil::LineSegmentIntersector::Intersections hits;
             if ( view->computeIntersections(ea.getX(), ea.getY(), hits) )
             {
-                s_mouseLabel->setText("");
+                s_asyncLabel->setText("");
+                s_asyncResLabel->setText("");
+
+                // Get the point under the mouse:
                 world = hits.begin()->getWorldIntersectPoint();
                 GeoPoint mapPoint;
                 mapPoint.fromWorld( _terrain->getSRS(), world );
-                _mouseSample = _async->getSample(mapPoint, 0.0);
-                _mouseSampleStart = osg::Timer::instance()->tick();
+
+                // Start the request. A resolution of 0.0 means please
+                // use the highest resolution available.
+                _asyncSample = _async->getSample(mapPoint);
+
+                _asyncSampleStart = osg::Timer::instance()->tick();
             }
-            else _mouseSample = Future<RefElevationSample2>();
+            else
+            {
+                _asyncSample = Future<RefElevationSample>();
+            }
         }
 
         else if (ea.getEventType() == ea.FRAME)
         {
-            updateMouseSample();
+            checkForAsyncResult();
         }
 
         return false;
@@ -247,11 +252,13 @@ struct QueryElevationHandler : public osgGA::GUIEventHandler
     const Terrain*   _terrain;
     bool             _mouseDown;
     osg::NodePath    _path;
-    osg::ref_ptr<ElevationEnvelope> _envelope;
-    Future<RefElevationSample2> _mouseSample;
-    osg::Timer_t _mouseSampleStart;
-    ElevationPool2::WorkingSet _ws;
+
     osg::ref_ptr<AsyncElevationSampler> _async;
+    GeoPoint _asyncSamplePoint;
+    Future<RefElevationSample> _asyncSample;
+    osg::Timer_t _asyncSampleStart;
+
+    ElevationPool::WorkingSet _workingSet;
 };
 
 
@@ -311,7 +318,8 @@ int main(int argc, char** argv)
     grid->setControl(0,r++,new LabelControl("Scene graph intersection:"));
     grid->setControl(0,r++,new LabelControl("EGM96 elevation:"));
     grid->setControl(0,r++,new LabelControl("Query resolution:"));
-    grid->setControl(0,r++,new LabelControl("Mouse async:"));
+    grid->setControl(0,r++,new LabelControl("Mouse (async):"));
+    grid->setControl(0,r++,new LabelControl("Mouse (async) resolution:"));
     grid->setControl(0, r++, new ButtonControl("Click to remove all elevation data", new ClickToRemoveElevation()));
 
     r = 1;
@@ -322,7 +330,8 @@ int main(int argc, char** argv)
     s_mapLabel = grid->setControl(1,r++,new LabelControl(""));
     s_egm96Label = grid->setControl(1,r++,new LabelControl(""));
     s_resLabel = grid->setControl(1,r++,new LabelControl(""));
-    s_mouseLabel = grid->setControl(1,r++, new LabelControl(""));
+    s_asyncLabel = grid->setControl(1,r++, new LabelControl(""));
+    s_asyncResLabel = grid->setControl(1,r++,new LabelControl(""));
 
     Style markerStyle;
     markerStyle.getOrCreate<ModelSymbol>()->url()->setLiteral("../data/axes.osgt.64.scale");

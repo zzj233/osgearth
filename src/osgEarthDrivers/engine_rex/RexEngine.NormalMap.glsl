@@ -52,6 +52,7 @@ $GLSL_DEFAULT_PRECISION_FLOAT
 
 #pragma import_defines(OE_TERRAIN_RENDER_NORMAL_MAP)
 #pragma import_defines(OE_DEBUG_NORMALS)
+#pragma import_defines(OE_DEBUG_CURVATURE)
 #pragma import_defines(OE_COMPRESSED_NORMAL_MAP)
 
 // import terrain SDK
@@ -86,12 +87,13 @@ void oe_rex_normalMapFS(inout vec4 color)
     oe_normalMapTBN = mat3(tangent, oe_normalMapBinormal, oe_UpVectorView);
     vp_Normal = normalize( oe_normalMapTBN*normalAndCurvature.xyz );
 
+#ifdef OE_DEBUG_CURVATURE
     // visualize curvature quantized:
-    //color.rgba = vec4(0.0,0,1);
-    //float curvature = 2.0*encodedNormal.w - 1.0;
-    //if (curvature > 0.0) color.r = curvature;
-    //if (curvature < 0.0) color.b = -curvature;
-    //color.a = 1.0;
+    color.rgba = vec4(0,0,0,1);
+    float curvature = normalAndCurvature.w;
+    if (curvature > 0.0) color.r = curvature;
+    if (curvature < 0.0) color.g = -curvature;
+#endif
 
 #ifdef OE_DEBUG_NORMALS
     // visualize normals:
