@@ -400,7 +400,7 @@ OE_LAYER_PROPERTY_IMPL(OGRFeatureSource, Query, Query, query);
 void
 OGRFeatureSource::init()
 {
-    Layer::init();
+    FeatureSource::init();
     _dsHandle = 0L;
     _layerHandle = 0L;
     _ogrDriverHandle = 0L;

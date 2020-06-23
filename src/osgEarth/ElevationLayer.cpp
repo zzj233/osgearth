@@ -837,7 +837,7 @@ ElevationLayerVector::populateHeightField(
                 if (resolutions)
                 {
                     std::pair<double,double> res = contenders[0].key.getResolution(hf->getNumColumns());
-                    for(int i=0; i<hf->getNumColumns()*hf->getNumRows(); ++i)
+                    for(unsigned i=0; i<hf->getNumColumns()*hf->getNumRows(); ++i)
                         resolutions[i] = res.second;
                 }
             }

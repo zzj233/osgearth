@@ -789,7 +789,8 @@ namespace
             _uri(uri),
             _promise(promise),
             _options(options),
-            _parentTileset(parentTileset)
+            _parentTileset(parentTileset),
+            _block("TDTiles LoadTilesetOp(OE)")
         {
             // Get the currently active request layer and reuse it when the operator actually occurs, which will probably be on a different thread.
             _requestLayer = NetworkMonitor::getRequestLayer();
@@ -1215,7 +1216,8 @@ ThreeDTilesetNode::ThreeDTilesetNode(Tileset* tileset, const std::string& author
     _lastExpiredFrame(0),
     _authorizationHeader(authorizationHeader),
     _sgCallbacks(sceneGraphCallbacks),
-	_sseDenominator(1.0)
+	_sseDenominator(1.0),
+    _mutex("ThreeDTilesetNode(OE)")
 {
     ADJUST_UPDATE_TRAV_COUNT(this, +1);
     const char* c = ::getenv("OSGEARTH_3DTILES_CACHE_SIZE");

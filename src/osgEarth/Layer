@@ -377,6 +377,7 @@ namespace osgEarth
         osg::ref_ptr<osgDB::Options> _readOptions;
         osg::ref_ptr<CacheSettings> _cacheSettings;
         std::vector<osg::ref_ptr<LayerShader> > _shaders;
+        mutable Threading::Mutex* _mutex;
 
     protected:
         typedef std::vector<osg::ref_ptr<LayerCallback> > CallbackVector;
@@ -399,6 +400,9 @@ namespace osgEarth
         //! internal cache information
         CacheSettings* getCacheSettings() { return _cacheSettings.get(); }
         const CacheSettings* getCacheSettings() const { return _cacheSettings.get(); }
+
+        //! subclass access to general-purpose layer mutex
+        Threading::Mutex& layerMutex() const { return *_mutex; }
 
     public: // serialization
         class OSGEARTH_EXPORT Options : public ConfigOptions
