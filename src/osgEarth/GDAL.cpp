@@ -444,7 +444,17 @@ _warpedDS(NULL),
 _maxDataLevel(30),
 _linearUnits(1.0)
 {
-    //nop
+    _threadId = osgEarth::Threading::getCurrentThreadId();
+}
+
+GDAL::Driver::~Driver()
+{
+    if (_warpedDS)
+        GDALClose(_warpedDS);
+    else if (_srcDS)
+        GDALClose(_srcDS);
+
+    OE_DEBUG << "Closed GDAL Driver on thread " << _threadId << std::endl;
 }
 
 void
@@ -1824,7 +1834,11 @@ GDALImageLayer::openOnThisThread(
 Status
 GDALImageLayer::closeImplementation()
 {
-    _driverPerThread.clear();
+    // safely shut down all per-thread handles.
+    {
+        Threading::ScopedWriteLock exclusive(_workers);
+        _driverPerThread.clear();
+    }
     dataExtents().clear();
     setProfile(NULL); // must do this to support override profiles
     return ImageLayer::closeImplementation();
@@ -1834,6 +1848,10 @@ GeoImage
 GDALImageLayer::createImageImplementation(const TileKey& key, ProgressCallback* progress) const
 {
     if (getStatus().isError())
+        return GeoImage::INVALID;
+
+    Threading::ScopedReadLock enterReader(_workers);
+    if (isClosing())
         return GeoImage::INVALID;
 
     osg::ref_ptr<GDAL::Driver>& driver = _driverPerThread.get();
@@ -1970,7 +1988,11 @@ GDALElevationLayer::openOnThisThread(
 Status
 GDALElevationLayer::closeImplementation()
 {
-    _driverPerThread.clear();
+    // safely shut down all per-thread handles.
+    {
+        Threading::ScopedWriteLock exclusive(_workers);
+        _driverPerThread.clear();
+    }
     dataExtents().clear();
     setProfile(NULL); // must do this to support override profiles
     return ElevationLayer::closeImplementation();
@@ -1980,6 +2002,10 @@ GeoHeightField
 GDALElevationLayer::createHeightFieldImplementation(const TileKey& key, ProgressCallback* progress) const
 {
     if (getStatus().isError())
+        return GeoHeightField::INVALID;
+
+    Threading::ScopedReadLock enterReader(_workers);
+    if (isClosing())
         return GeoHeightField::INVALID;
 
     osg::ref_ptr<GDAL::Driver>& driver = _driverPerThread.get();

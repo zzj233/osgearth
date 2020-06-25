@@ -87,6 +87,8 @@ namespace osgEarth { namespace GDAL
         //! Constructs a new driver
         Driver();
 
+        virtual ~Driver();
+
         //! Value to interpet as "no data"
         void setNoDataValue(float value) { _noDataValue = value; }
 
@@ -157,6 +159,7 @@ namespace osgEarth { namespace GDAL
         const GDAL::Options& gdalOptions() const { return _gdalOptions; }
         osg::ref_ptr<GDAL::ExternalDataset> _externalDataset;
         std::string _name;
+        unsigned _threadId;
 
         const std::string& getName() const { return _name; }
     };
@@ -248,6 +251,8 @@ namespace osgEarth
             osg::ref_ptr<GDAL::Driver>& driver,
             osg::ref_ptr<const Profile>* out_profile,
             osg::ref_ptr<const Profile>* out_overrideProfile) const;
+
+        mutable Threading::ReadWriteMutex _workers;
     };
 
 
@@ -321,6 +326,8 @@ namespace osgEarth
             osg::ref_ptr<GDAL::Driver>& driver,
             osg::ref_ptr<const Profile>* out_profile,
             osg::ref_ptr<const Profile>* out_overrideProfile) const;
+
+        mutable Threading::ReadWriteMutex _workers;
     };
 
 } // namespace osgEarth

@@ -258,6 +258,7 @@ Layer::init()
     _uid = osgEarth::Registry::instance()->createUID();
     _renderType = RENDERTYPE_NONE;
     _status.set(Status::ResourceUnavailable, getEnabled() ? "Layer closed" : "Layer disabled");
+    _isClosing = false;
 
     // For detecting scene graph changes at runtime
     _sceneGraphCallbacks = new SceneGraphCallbacks(this);
@@ -368,9 +369,11 @@ Layer::close()
 {
     if (isOpen())
     {
+        _isClosing = true;
         closeImplementation();
         _status.set(Status::ResourceUnavailable, "Layer closed");
         fireCallback(&LayerCallback::onClose);
+        _isClosing = false;
     }
     return getStatus();
 }

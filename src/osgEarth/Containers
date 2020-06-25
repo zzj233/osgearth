@@ -570,25 +570,31 @@ namespace osgEarth { namespace Util
 
     /** Template for per-thread data storage */
     template<typename T>
-    struct PerThread
+    struct PerThread : public Threading::Mutex
     {
-        PerThread() { }
+        PerThread() : Threading::Mutex() { }
 
-        PerThread(const std::string& name) : _mutex(name) { }
+        PerThread(const std::string& name) : Threading::Mutex(name) { }
 
         T& get() {
-            Threading::ScopedMutexLock lock(_mutex);
+            Threading::ScopedMutexLock lock(*this);
             return _data[Threading::getCurrentThreadId()];
         }
 
         void clear() {
-            Threading::ScopedMutexLock lock(_mutex);
+            Threading::ScopedMutexLock lock(*this);
             _data.clear();
         }
 
+        typedef typename std::unordered_map<unsigned,T> container_t;
+        typedef typename container_t::iterator iterator;
+
+        // NB. lock before using these!
+        iterator begin() { return _data.begin(); }
+        iterator end() { return _data.end(); }
+
     private:
-        std::unordered_map<unsigned,T> _data;
-        Threading::Mutex _mutex;
+        container_t _data;
     };
 
 
