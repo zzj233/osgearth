@@ -52,10 +52,11 @@
 - Tracy integration - profiling
 - Better error reporting infrastructure
 - Performance improvements & bug fixes galore
+- New documentation structure
 
 
 
-## Version 2.10 (TBD 2018)
+## Version 2.10 (2018)
 
 - REX terrain engine promoted to default. Old MP engine is now in legacy support mode.
 - Removed the osgEarthQt nodekit from the SDK, along with all Qt examples

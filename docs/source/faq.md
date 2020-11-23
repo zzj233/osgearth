@@ -1,13 +1,5 @@
 # FAQ
 
-* [Using the API](#Using the API)
-
-* [Community and Support](#Community and Support)
-
-* [Licensing](#Licensing)
-
-  
-
 ## Using the API
 
 ### How do I place a 3D model on the map?

@@ -30,11 +30,9 @@ Help us add useful sources of Free data to this list.
 
 ## Tips for Preparing your own Data
 
-### Processing Local Source Data
-
 If you have geospatial data that you would like to view in osgEarth, you can usually use the GDAL driver. If you plan on doing this, try loading it as-is first. If you find that it's too slow, here are some tips for optimizing your data for tiled access.
 
-#### Reproject your data
+### Reproject your data
 
 osgEarth will reproject your data on-the-fly if it does not have the necessary coordinate system. For instance, if you are trying to view a UTM image on a geodetic globe (epsg:4326). However, osgEarth will run much faster if your data is already in the correct coordinate system. You can use any tool you want to reproject your data such as GDAL, Global Mapper or ArcGIS.
 
@@ -43,7 +41,7 @@ For example, to reproject a UTM image to geodetic using ```gdal_warp```:
 gdalwarp -t_srs epsg:4326 my_utm_image.tif my_gd_image.tif
 ```
 
-#### Build internal tiles
+### Build internal tiles
 
 Typically formats such as GeoTiff store their pixel data in scanlines. However, using a tiled dataset will be more efficient for osgEarth because of how it uses tiles internally.
 
@@ -57,14 +55,14 @@ Take it a step further and use compression to save space. You can use internal J
 gdal_translate -of GTiff -co TILED=YES -co COMPRESS=JPG input.tif output.tif
 ```
 
-#### Build overviews
+### Build overviews
 
 Adding overviews (also called ''pyramids'' or ''rsets'') can sometimes increase the performance of a large data source in osgEarth. You can use the [gdaladdo](http://gdal.org/gdaladdo.html) utility to add overviews to a dataset:
 ```
 gdaladdo -r average myimage.tif 2 4 8 16
 ```
 
-#### Spatial indexing for feature data
+### Spatial indexing for feature data
 
 Large vector feature datasets (e.g., shapefiles) will benefit greatly from a spatial index. Using the ```ogrinfo``` tool (included with GDAL/OGR binary distributions) you can create a spatial index for your vector data like so:
 
@@ -74,7 +72,7 @@ ogrinfo -sql "CREATE SPATIAL INDEX ON myfile" myfile.shp
 
 For shapefiles, this will generate a ".qix" file that contains the spatial index information.
 
-#### Build tile sets with osgearth_conv
+### Build tile sets with osgearth_conv
 
 Pre-tiling your imagery can speed up load time dramatically, especially over the network. In fact, if you want to serve your data over the network, this is the only way!
 
