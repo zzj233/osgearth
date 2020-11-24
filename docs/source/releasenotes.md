@@ -8,6 +8,8 @@ As of this release, osgEarth requires C++11.
 
 GEOS: We transitioned from the GEOS C++ API to the C API for stability reasons. If you see GEOS compile/linker errors, this is likely the reason and you should make sure to link with the C library from now on. (GEOS is an optional dependency that enables some feature processing operations.)
 
+Release Highlights:
+
 - New ```TerrainConstraintLayer``` for masking and custom terrain tessellation. Please see ```constraints.earth``` for sample applications. This replaces and extends the old ```MaskLayer``` type.
 - New ```LERCImageLayer``` (ESRI format)
 - New ```ArcGISTilePackageElevationLayer```
