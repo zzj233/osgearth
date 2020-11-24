@@ -60,5 +60,6 @@ These are the public layer types native to osgEarth.
 | ThreeDTiles       | ThreeDTilesLayer       | Displays a 3D-Tiles dataset                                  |
 | UTMGraticule      | UTMGraticuleLayer      | Displays a simple UTM graticule                              |
 | Video             | VideoLayer             | Renders various video formats to a layer (using FFMPEG)      |
+| Viewpoints        | ViewpointsLayer        | Pre-set viewpoints that a viewer application can display for the user |
 | Wind              | WindLayer              | Incorporates a wind model (needs other layers that can use the data) |
 
