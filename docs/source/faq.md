@@ -110,14 +110,3 @@ If we decide NOT to include your submission, you can still keep it in our cloned
 
 Of course! We at Pelican Mapping are in the business of supporting users of the osgEarth SDK and are available for contracting, training, and integration services. The easiest way to get in touch with us is through our web site [contact form](http://pelicanmapping.com/?page_id=2).
 
-
-## Licensing
-
-### Can I use osgEarth in a commercial product?
-
-Yes. The license permits use in a commercial product. The only requirement is that any changes you make to the actual osgEarth library *itself* be made available under the same license as osgEarth. You do *not* need to make other parts of your application public.
-
-
-### Can I use osgEarth in an iOS app?
-
-Yes. Apple's policy requires only statically linked libraries. Technically, the LGPL does not support static linking, but we grant an exception in this case.

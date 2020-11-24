@@ -15,7 +15,7 @@ Join the [osgEarth Discussion Forum](http://forum.osgearth.org) to interact with
 * Always include as much supporting information as possible. Post an earth file or short code snippet. Post the output to osgearth_version --caps. Post the output to gdalinfo if you are having trouble with a GeoTIFF or other data file. List everything you have tried so far.
 * Be patient!
 
-## OpenSceneGraph Mailing List
+## OpenSceneGraph Support
 
 osgEarth operates on top of OpenSceneGraph (OSG), an open source 3D rendering toolkit. If you are unable to find answers to your problems on GitHub or in the osgEarth Forum, the [OSG Google Group](https://groups.google.com/g/osg-users) is another place to look.
 
