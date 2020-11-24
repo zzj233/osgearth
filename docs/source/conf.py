@@ -251,8 +251,6 @@ texinfo_documents = [
 # How to display URL addresses: 'footnote', 'no', or 'inline'.
 #texinfo_show_urls = 'footnote'
 
-html_css_files = ['styles.css']
-
 # Custom setup
 def setup(app):
     app.add_css_file('styles.css')
