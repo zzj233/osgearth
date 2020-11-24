@@ -35,7 +35,7 @@ git clone https://github.com/gwaldron/osgearth.git
 mkdir build
 ```
 
-**Step 4 - Configure CMake**
+**Step 3 - Configure CMake**
 
 vcpkg provides a CMake toolchain file that helps osgEarth find all of its dependencies.
 
@@ -44,17 +44,10 @@ Note: You’ll need to specify a different build directory based on your build c
 Most developers will use a RelWithDebInfo build, like so:
 
 ```
-cmake \
-	-S osgearth \
-	-B build \
-	-G "Visual Studio 15 2017 Win64" \
-	-DCMAKE_BUILD_TYPE=RelWithDebInfo  \
-	-DWIN32_USE_MP=ON \
-	-DCMAKE_INSTALL_PREFIX=[folder to install osgEarth to] \
-	-DCMAKE_TOOLCHAIN_FILE=[vcpkg root]\scripts\buildsystems\vcpkg.cmake
+cmake -S osgearth -B build -G "Visual Studio 15 2017 Win64" -DCMAKE_BUILD_TYPE=RelWithDebInfo -DWIN32_USE_MP=ON -DCMAKE_INSTALL_PREFIX=[installroot] -DCMAKE_TOOLCHAIN_FILE=[vcpkgroot]\scripts\buildsystems\vcpkg.cmake
 ```
 
-**Step 5 - Build and install osgEarth**
+**Step 4 - Build and install osgEarth**
 
 You can build and install osgEarth on the command line using CMake or you can open up the Visual Studio solution and build it from there.
 
@@ -62,13 +55,13 @@ You can build and install osgEarth on the command line using CMake or you can op
 cmake --build build --target INSTALL --config RelWithDebInfo
 ```
 
-**Step 6 - Set up your runtime environment**
+**Step 5 - Set up your runtime environment**
 
 You’ll need to make sure that the vcpkg dependencies and osgEarth are in your path:
 
 ```
 set PATH=%PATH%;c:\vcpkg\installed\x64-windows\bin
 set PATH=%PATH%;c:\vcpkg\installed\x64-windows\tools\osg
-set PATH=%PATH%;[folder where you installed osgEarth]
+set PATH=%PATH%;[installroot]
 ```
 
