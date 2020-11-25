@@ -1,5 +1,7 @@
 # Building osgEarth
 
+The documentation here is focused on Windows. 
+
 ## Building with vcpkg
 
 [vcpkg](https://github.com/Microsoft/vcpkg) is an extremely useful package manager. It works on Windows, Linux and MacOS but for this guide we will focus on Windows.
@@ -8,7 +10,7 @@
 
 First, download and bootstrap [vcpkg](https://github.com/Microsoft/vcpkg) following the instructions on the page.
 
-Next install the dependencies required to build a fully functional osgEarth. This example assume s 64-bit WIndows build; you can alter that to correspond to your platform/architecture of choice.
+Next install the dependencies required to build a fully functional osgEarth. This example assume s 64-bit Windows build; you can alter that to correspond to your platform/architecture of choice.
 
 Install the required dependencies:
 
@@ -116,7 +118,7 @@ The context version and profile mask are also settable via the `osg::DisplaySett
 
 Running osgEarth in a virtual machine environment can be tricky since they usually don't have direct access to the graphics hardware by default. If you are having trouble you can try these tips.
 
-First, make sure you have built OSG and osgEarth for GL CORE profile (as above).
+First, build OSG and osgEarth for GL CORE profile (as above). 
 
 Next, assess the situation with a capabilities check:
 

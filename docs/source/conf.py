@@ -254,3 +254,7 @@ texinfo_documents = [
 # Custom setup
 def setup(app):
     app.add_css_file('styles.css')
+    app.add_config_value('recommonmark_config', {
+        'enable_auto_toc_tree': True,
+    }, True)
+    app.add_transform(AutoStructify)
