@@ -65,3 +65,79 @@ set PATH=%PATH%;c:\vcpkg\installed\x64-windows\tools\osg
 set PATH=%PATH%;[installroot]
 ```
 
+## Building for OpenGL CORE Profile
+
+You may wish to build osgEarth with support for the OpenGL CORE profile. In fact is a requirement for some platforms including Apple OSX and VMWare. Doing to requires that you first build OpenSceneGraph with CORE profile support. The OpenSceneGraph dependency in *vcpkg* does NOT have GLCORE support (at the time of this writing) so you will have to build it yourself. 
+
+#### Build OpenSceneGraph for GLCORE
+
+1. First, [download the GL CORE include files from Khronos](https://www.khronos.org/registry/OpenGL/api/GL) and place them somewhere on your system. We'll call this the GLCORE folder.
+2. In CMake, set the `OPENGL_PROFILE` property to "GLCORE".
+3. In CMake, set the `GLCORE_GLCOREARB_HEADER` property to the location of the GL folder you downloaded from Khronos. For example, if you include file is at `C:\glcore\GL\glcorearb.h` you should set this property to `C:\glcore`.
+4. In CMake, set the following properties to `ON` :
+   * `OSG_GL3_AVAILABLE`
+5. In CMake, set the following properties to `OFF` :
+   * `OSG_GL1_AVAILABLE`
+   * `OSG_GL2_AVAILABLE`
+   * `OSG_GLES1_AVAILABLE`
+   * `OSG_GLES2_AVAILABLE`
+   * `OSG_GL_DISPLAYLISTS_AVAILABLE`
+   * `OSG_GL_FIXED_FUNCTION_AVAILABLE`
+   * `OSG_GL_MATRICES_AVAILABLE`
+   * `OSG_GL_VERTEX_ARRAY_FUNCS_AVAILABLE`
+   * `OSG_GL_VERTEX_FUNCS_AVAILABLE`
+6. Configure and build OpenSceneGraph.
+
+#### Build osgEarth for GLCORE
+
+Now that you have OSG built with GLCORE support, time to build osgEarth.
+
+1. In CMake, set the `OSGEARTH_GLCORE_INCLUDE_DIR` property to the same folder holding the Khronos include files (the same value of the `GLCORE_GLCOREARB_HEADER` in your OSG build).
+2. Configure and build osgEarth.
+
+Test you build by running this on the command line (Windows)
+
+```
+set OSG_GL_CONTEXT_VERSION=4.6
+osgearth_version --caps
+```
+
+If all went well, it should report **"Core Profile = yes"**.
+
+You can disable the CORE profile and select a compatibility profile by setting a profile mask like so
+
+```
+set OSG_GL_CONTEXT_PROFILE_MASK=1
+```
+
+The context version and profile mask are also settable via the `osg::DisplaySettings` class in the OpenSceneGraph API.
+
+## Tips for VMware Users
+
+Running osgEarth in a virtual machine environment can be tricky since they usually don't have direct access to the graphics hardware by default. If you are having trouble you can try these tips.
+
+First, make sure you have built OSG and osgEarth for GL CORE profile (as above).
+
+Next, assess the situation with a capabilities check:
+
+```
+osgearth_version --caps
+```
+
+The output will look something like this:
+
+```
+GPU Vendor:        WMware, Inc.
+GPU Renderer       Gallium 0.3 on llvmpipe
+GL/Driver Version: 1.2 Mesa 11.2.0
+```
+
+If is reports a Mesa driver, and the version is less than 3.3, you will need to configure a couple environment variables to move forward (Windows):
+
+```
+set OSG_GL_CONTEXT_VERSION=3.3
+set MESA_GL_VERSION_OVERRIDE=3.3
+osgearth_version --caps
+```
+
+Good luck!
