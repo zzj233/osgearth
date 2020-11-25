@@ -20,6 +20,7 @@ import sys, os
 
 # Markdown support
 from recommonmark.parser import CommonMarkParser
+from recommonmark.transform import AutoStructify
 
 # -- General configuration -----------------------------------------------------
 
